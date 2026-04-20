@@ -20,7 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Card, Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  getModelPriceItems,
+  getModelPricingColumns,
+} from '../../../../../helpers';
 
 const { Text } = Typography;
 
@@ -77,6 +81,7 @@ const ModelPricingTable = ({
               ? t('按次计费')
               : '-',
         priceItems: getModelPriceItems(priceData, t, siteDisplayType),
+        pricingColumns: getModelPricingColumns(priceData, t, siteDisplayType),
       };
     });
 
@@ -123,22 +128,61 @@ const ModelPricingTable = ({
       },
     });
 
-    columns.push({
-      title: siteDisplayType === 'TOKENS' ? t('计费摘要') : t('价格摘要'),
-      dataIndex: 'priceItems',
-      render: (items) => (
-        <div className='space-y-1'>
-          {items.map((item) => (
-            <div key={item.key}>
-              <div className='font-semibold text-orange-600'>
-                {item.label} {item.value}
+    if (siteDisplayType === 'TOKENS') {
+      columns.push({
+        title: t('计费摘要'),
+        dataIndex: 'priceItems',
+        render: (items) => (
+          <div className='space-y-1'>
+            {items.map((item) => (
+              <div key={item.key}>
+                <div className='font-semibold text-orange-600'>
+                  {item.label} {item.value}
+                </div>
+                <div className='text-xs text-gray-500'>{item.suffix}</div>
               </div>
-              <div className='text-xs text-gray-500'>{item.suffix}</div>
-            </div>
-          ))}
-        </div>
-      ),
-    });
+            ))}
+          </div>
+        ),
+      });
+    } else {
+      const tokenPriceColumnDefs = [
+        { key: 'input', title: t('提示') },
+        { key: 'completion', title: t('补全') },
+        { key: 'cache', title: t('缓存读取') },
+      ];
+
+      tokenPriceColumnDefs.forEach(({ key, title }) => {
+        columns.push({
+          title,
+          dataIndex: 'pricingColumns',
+          render: (pricingColumns) => {
+            const column = Array.isArray(pricingColumns)
+              ? pricingColumns.find((item) => item.key === key)
+              : null;
+            if (!column) {
+              return <span className='text-gray-400'>-</span>;
+            }
+            return (
+              <div>
+                <div className='font-semibold text-orange-600'>
+                  {column.value}
+                </div>
+                <div className='text-xs text-gray-500'>{column.suffix}</div>
+                {column.originalValue && (
+                  <div
+                    className='text-xs text-gray-400'
+                    style={{ textDecoration: 'line-through' }}
+                  >
+                    {t('原价')}: {column.originalValue}
+                  </div>
+                )}
+              </div>
+            );
+          },
+        });
+      });
+    }
 
     return (
       <Table

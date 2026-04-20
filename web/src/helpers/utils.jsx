@@ -874,6 +874,65 @@ export const getModelPriceItems = (
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
 };
 
+export const getModelPricingColumns = (
+  priceData,
+  t,
+  quotaDisplayType = 'USD',
+) => {
+  if (!priceData?.isPerToken || quotaDisplayType === 'TOKENS' || priceData.isTokensDisplay) {
+    return [];
+  }
+
+  const unitSuffix = ` / 1${priceData.unitLabel} tokens`;
+
+  const buildColumn = ({
+    key,
+    title,
+    value,
+    originalValue,
+  }) => {
+    if (value === null || value === undefined || value === '') return null;
+
+    const normalizedValue = String(value);
+    const normalizedOriginal =
+      originalValue === null || originalValue === undefined || originalValue === ''
+        ? ''
+        : String(originalValue);
+
+    return {
+      key,
+      title,
+      value: normalizedValue,
+      suffix: unitSuffix,
+      originalValue:
+        normalizedOriginal && normalizedOriginal !== normalizedValue
+          ? normalizedOriginal
+          : '',
+    };
+  };
+
+  return [
+    buildColumn({
+      key: 'input',
+      title: t('提示'),
+      value: priceData.inputPrice,
+      originalValue: priceData.originalInputPrice,
+    }),
+    buildColumn({
+      key: 'completion',
+      title: t('补全'),
+      value: priceData.completionPrice,
+      originalValue: priceData.originalCompletionPrice,
+    }),
+    buildColumn({
+      key: 'cache',
+      title: t('缓存读取'),
+      value: priceData.cachePrice,
+      originalValue: priceData.originalCachePrice,
+    }),
+  ].filter(Boolean);
+};
+
 // 格式化价格信息（用于卡片视图）
 export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
   const items = getModelPriceItems(priceData, t, quotaDisplayType);
