@@ -43,6 +43,7 @@ const ModelPricingTable = ({
   const modelEnableGroups = Array.isArray(modelData?.enable_groups)
     ? modelData.enable_groups
     : [];
+  const autoChain = autoGroups.filter((g) => modelEnableGroups.includes(g));
   const tokenPriceColumnDefs = [
     { key: 'input', title: t('提示') },
     { key: 'completion', title: t('补全') },
