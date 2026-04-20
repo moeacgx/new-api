@@ -43,7 +43,34 @@ const ModelPricingTable = ({
   const modelEnableGroups = Array.isArray(modelData?.enable_groups)
     ? modelData.enable_groups
     : [];
-  const autoChain = autoGroups.filter((g) => modelEnableGroups.includes(g));
+  const tokenPriceColumnDefs = [
+    { key: 'input', title: t('提示') },
+    { key: 'completion', title: t('补全') },
+    { key: 'cache', title: t('缓存读取') },
+  ];
+
+  const renderTokenPriceCell = (pricingColumns, key) => {
+    const column = Array.isArray(pricingColumns)
+      ? pricingColumns.find((item) => item.key === key)
+      : null;
+
+    if (!column) {
+      return <span className='text-gray-400'>-</span>;
+    }
+
+    return (
+      <div>
+        <div className='font-semibold text-orange-600'>{column.value}</div>
+        <div className='text-xs text-gray-500'>{column.suffix}</div>
+        {column.originalValue && (
+          <div className='text-xs text-gray-400 line-through'>
+            {t('原价')}: {column.originalValue}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderGroupPriceTable = () => {
     // 仅展示模型可用的分组：模型 enable_groups 与用户可用分组的交集
 
@@ -146,40 +173,11 @@ const ModelPricingTable = ({
         ),
       });
     } else {
-      const tokenPriceColumnDefs = [
-        { key: 'input', title: t('提示') },
-        { key: 'completion', title: t('补全') },
-        { key: 'cache', title: t('缓存读取') },
-      ];
-
       tokenPriceColumnDefs.forEach(({ key, title }) => {
         columns.push({
           title,
           dataIndex: 'pricingColumns',
-          render: (pricingColumns) => {
-            const column = Array.isArray(pricingColumns)
-              ? pricingColumns.find((item) => item.key === key)
-              : null;
-            if (!column) {
-              return <span className='text-gray-400'>-</span>;
-            }
-            return (
-              <div>
-                <div className='font-semibold text-orange-600'>
-                  {column.value}
-                </div>
-                <div className='text-xs text-gray-500'>{column.suffix}</div>
-                {column.originalValue && (
-                  <div
-                    className='text-xs text-gray-400'
-                    style={{ textDecoration: 'line-through' }}
-                  >
-                    {t('原价')}: {column.originalValue}
-                  </div>
-                )}
-              </div>
-            );
-          },
+          render: (pricingColumns) => renderTokenPriceCell(pricingColumns, key),
         });
       });
     }
