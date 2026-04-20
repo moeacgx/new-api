@@ -701,6 +701,12 @@ export const calculateModelPrice = ({
       return `${symbol}${numericPrice.toFixed(precision)}`;
     };
 
+    const formatOriginalTokenPrice = (baseRatio) => {
+      if (!hasRatioValue(baseRatio)) return null;
+      const basePriceUSD = Number(baseRatio) * 2;
+      return formatTokenPrice(basePriceUSD);
+    };
+
     const inputPrice = formatTokenPrice(inputRatioPriceUSD);
     const audioInputPrice = hasRatioValue(record.audio_ratio)
       ? formatTokenPrice(inputRatioPriceUSD * Number(record.audio_ratio))
@@ -708,11 +714,22 @@ export const calculateModelPrice = ({
 
     return {
       inputPrice,
+      originalInputPrice: formatOriginalTokenPrice(record.model_ratio),
       completionPrice: formatTokenPrice(
         inputRatioPriceUSD * Number(record.completion_ratio),
       ),
+      originalCompletionPrice: hasRatioValue(record.completion_ratio)
+        ? formatOriginalTokenPrice(
+            Number(record.model_ratio) * Number(record.completion_ratio),
+          )
+        : null,
       cachePrice: hasRatioValue(record.cache_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.cache_ratio))
+        : null,
+      originalCachePrice: hasRatioValue(record.cache_ratio)
+        ? formatOriginalTokenPrice(
+            Number(record.model_ratio) * Number(record.cache_ratio),
+          )
         : null,
       createCachePrice: hasRatioValue(record.create_cache_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
