@@ -52,6 +52,14 @@
 
 </div>
 
+## ⚠️ Branch Guide
+
+> This fork keeps `main` aligned with upstream for sync/reference.
+> Active secondary-development and production customizations live on `custom-main`.
+> If you want the customized deployment branch, use `custom-main` instead of `main`.
+
+---
+
 ## 📝 Project Description
 
 > [!IMPORTANT]
