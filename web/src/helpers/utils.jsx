@@ -712,6 +712,8 @@ export const calculateModelPrice = ({
       return `${symbol}${numericPrice.toFixed(precision)}`;
     };
 
+    // NOTE(custom-main): pricing UI still consumes original* fields to render struck-through 原价.
+    // If upstream refactors calculateModelPrice again, keep these original* return values in sync with getModelPricingColumns.
     const inputPrice = formatTokenPrice(inputRatioPriceUSD);
     const originalInputPrice = formatTokenPrice(originalInputRatioPriceUSD);
     const completionPrice = formatTokenPrice(
