@@ -660,6 +660,7 @@ export const calculateModelPrice = ({
     // 按量计费
     const isTokensDisplay = quotaDisplayType === 'TOKENS';
     const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
+    const originalInputRatioPriceUSD = record.model_ratio * 2;
     const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
     const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
     const hasRatioValue = (value) =>
@@ -712,24 +713,38 @@ export const calculateModelPrice = ({
     };
 
     const inputPrice = formatTokenPrice(inputRatioPriceUSD);
+    const originalInputPrice = formatTokenPrice(originalInputRatioPriceUSD);
+    const completionPrice = formatTokenPrice(
+      inputRatioPriceUSD * Number(record.completion_ratio),
+    );
+    const originalCompletionPrice = formatTokenPrice(
+      originalInputRatioPriceUSD * Number(record.completion_ratio),
+    );
+    const cachePrice = hasRatioValue(record.cache_ratio)
+      ? formatTokenPrice(inputRatioPriceUSD * Number(record.cache_ratio))
+      : null;
+    const originalCachePrice = hasRatioValue(record.cache_ratio)
+      ? formatTokenPrice(originalInputRatioPriceUSD * Number(record.cache_ratio))
+      : null;
+    const createCachePrice = hasRatioValue(record.create_cache_ratio)
+      ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
+      : null;
+    const imagePrice = hasRatioValue(record.image_ratio)
+      ? formatTokenPrice(inputRatioPriceUSD * Number(record.image_ratio))
+      : null;
     const audioInputPrice = hasRatioValue(record.audio_ratio)
       ? formatTokenPrice(inputRatioPriceUSD * Number(record.audio_ratio))
       : null;
 
     return {
       inputPrice,
-      completionPrice: formatTokenPrice(
-        inputRatioPriceUSD * Number(record.completion_ratio),
-      ),
-      cachePrice: hasRatioValue(record.cache_ratio)
-        ? formatTokenPrice(inputRatioPriceUSD * Number(record.cache_ratio))
-        : null,
-      createCachePrice: hasRatioValue(record.create_cache_ratio)
-        ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
-        : null,
-      imagePrice: hasRatioValue(record.image_ratio)
-        ? formatTokenPrice(inputRatioPriceUSD * Number(record.image_ratio))
-        : null,
+      originalInputPrice,
+      completionPrice,
+      originalCompletionPrice,
+      cachePrice,
+      originalCachePrice,
+      createCachePrice,
+      imagePrice,
       audioInputPrice,
       audioOutputPrice:
         audioInputPrice && hasRatioValue(record.audio_completion_ratio)
