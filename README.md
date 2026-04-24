@@ -52,11 +52,11 @@
 
 </div>
 
-## ⚠️ Branch Guide
+## ⚠️ 分支说明
 
-> This fork keeps `main` aligned with upstream for sync/reference.
-> Active secondary-development and production customizations live on `custom-main`.
-> If you want the customized deployment branch, use `custom-main` instead of `main`.
+> `main` 分支用于与上游保持同步，作为官方更新的参考线。
+> `custom-main` 分支用于当前生产环境的二次开发与定制维护。
+> 如需使用本仓库的定制版本，请选择 `custom-main`，不要直接使用 `main`。
 
 ---
 
