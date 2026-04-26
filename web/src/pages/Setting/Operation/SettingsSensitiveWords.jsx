@@ -261,20 +261,23 @@ export default function SettingsSensitiveWords(props) {
             {inputs.SensitiveWordsGroupRules.map((rule, index) => (
               <Row gutter={12} key={`group-rule-${index}`} style={{ marginTop: 12 }}>
                 <Col xs={24} sm={8} md={6} lg={6} xl={6}>
-                  <Form.Input
-                    field={`SensitiveWordsGroupRules.${index}.group`}
-                    label={t('分组')}
+                  <div className='semi-form-field-label-text' style={{ marginBottom: 4, fontWeight: 600 }}>{t('分组')}</div>
+                  <input
+                    className='semi-input'
+                    style={{ width: '100%', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--semi-color-border)', background: 'var(--semi-color-fill-0)', fontSize: 14, lineHeight: '32px', boxSizing: 'border-box' }}
                     placeholder={t('例如：Codex专用')}
-                    onChange={(value) => updateGroupRule(index, { group: value })}
+                    value={rule.group || ''}
+                    onChange={(e) => updateGroupRule(index, { group: e.target.value })}
                   />
                 </Col>
                 <Col xs={24} sm={16} md={12} lg={12} xl={12}>
-                  <Form.TextArea
-                    field={`SensitiveWordsGroupRules.${index}.words`}
-                    label={t('屏蔽词')}
+                  <div className='semi-form-field-label-text' style={{ marginBottom: 4, fontWeight: 600 }}>{t('屏蔽词')}</div>
+                  <textarea
+                    className='semi-input'
+                    style={{ width: '100%', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--semi-color-border)', background: 'var(--semi-color-fill-0)', fontSize: 14, minHeight: 100, fontFamily: 'JetBrains Mono, Consolas', resize: 'vertical', boxSizing: 'border-box' }}
                     placeholder={t('一行一个屏蔽词，不需要符号分割')}
-                    onChange={(value) => updateGroupRule(index, { words: value })}
-                    autosize={{ minRows: 4, maxRows: 8 }}
+                    value={rule.words || ''}
+                    onChange={(e) => updateGroupRule(index, { words: e.target.value })}
                   />
                 </Col>
                 <Col xs={24} sm={24} md={4} lg={4} xl={4} style={{ display: 'flex', alignItems: 'end' }}>
@@ -310,20 +313,23 @@ export default function SettingsSensitiveWords(props) {
             {inputs.SensitiveWordsModelRules.map((rule, index) => (
               <Row gutter={12} key={`model-rule-${index}`} style={{ marginTop: 12 }}>
                 <Col xs={24} sm={8} md={6} lg={6} xl={6}>
-                  <Form.Input
-                    field={`SensitiveWordsModelRules.${index}.model`}
-                    label={t('模型')}
+                  <div className='semi-form-field-label-text' style={{ marginBottom: 4, fontWeight: 600 }}>{t('模型')}</div>
+                  <input
+                    className='semi-input'
+                    style={{ width: '100%', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--semi-color-border)', background: 'var(--semi-color-fill-0)', fontSize: 14, lineHeight: '32px', boxSizing: 'border-box' }}
                     placeholder={t('例如：gpt-5.5')}
-                    onChange={(value) => updateModelRule(index, { model: value })}
+                    value={rule.model || ''}
+                    onChange={(e) => updateModelRule(index, { model: e.target.value })}
                   />
                 </Col>
                 <Col xs={24} sm={16} md={12} lg={12} xl={12}>
-                  <Form.TextArea
-                    field={`SensitiveWordsModelRules.${index}.words`}
-                    label={t('屏蔽词')}
+                  <div className='semi-form-field-label-text' style={{ marginBottom: 4, fontWeight: 600 }}>{t('屏蔽词')}</div>
+                  <textarea
+                    className='semi-input'
+                    style={{ width: '100%', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--semi-color-border)', background: 'var(--semi-color-fill-0)', fontSize: 14, minHeight: 100, fontFamily: 'JetBrains Mono, Consolas', resize: 'vertical', boxSizing: 'border-box' }}
                     placeholder={t('一行一个屏蔽词，不需要符号分割')}
-                    onChange={(value) => updateModelRule(index, { words: value })}
-                    autosize={{ minRows: 4, maxRows: 8 }}
+                    value={rule.words || ''}
+                    onChange={(e) => updateModelRule(index, { words: e.target.value })}
                   />
                 </Col>
                 <Col xs={24} sm={24} md={4} lg={4} xl={4} style={{ display: 'flex', alignItems: 'end' }}>
