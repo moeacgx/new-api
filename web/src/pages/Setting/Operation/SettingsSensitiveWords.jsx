@@ -260,7 +260,6 @@ export default function SettingsSensitiveWords(props) {
                     field={`SensitiveWordsGroupRules.${index}.group`}
                     label={t('分组')}
                     placeholder={t('例如：Codex专用')}
-                    value={rule.group}
                     onChange={(value) => updateGroupRule(index, { group: value })}
                   />
                 </Col>
@@ -269,7 +268,6 @@ export default function SettingsSensitiveWords(props) {
                     field={`SensitiveWordsGroupRules.${index}.words`}
                     label={t('屏蔽词')}
                     placeholder={t('一行一个屏蔽词，不需要符号分割')}
-                    value={rule.words}
                     onChange={(value) => updateGroupRule(index, { words: value })}
                     autosize={{ minRows: 4, maxRows: 8 }}
                   />
@@ -311,7 +309,6 @@ export default function SettingsSensitiveWords(props) {
                     field={`SensitiveWordsModelRules.${index}.model`}
                     label={t('模型')}
                     placeholder={t('例如：gpt-5.5')}
-                    value={rule.model}
                     onChange={(value) => updateModelRule(index, { model: value })}
                   />
                 </Col>
@@ -320,7 +317,6 @@ export default function SettingsSensitiveWords(props) {
                     field={`SensitiveWordsModelRules.${index}.words`}
                     label={t('屏蔽词')}
                     placeholder={t('一行一个屏蔽词，不需要符号分割')}
-                    value={rule.words}
                     onChange={(value) => updateModelRule(index, { words: value })}
                     autosize={{ minRows: 4, maxRows: 8 }}
                   />
