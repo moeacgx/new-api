@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting"
 )
 
@@ -33,13 +32,7 @@ func CheckSensitiveMessages(messages []dto.Message, group string, model string) 
 }
 
 func CheckSensitiveText(text string, group string, model string) (bool, []string) {
-	words := setting.GetEffectiveSensitiveWords(group, model)
-	contains, matched := SensitiveWordContains(text, group, model)
-	logger.SysLog("sensitive-check text group=" + group + " model=" + model + " words=" + strings.Join(words, ",") + " text=" + text)
-	if contains {
-		logger.SysLog("sensitive-check matched=" + strings.Join(matched, ","))
-	}
-	return contains, matched
+	return SensitiveWordContains(text, group, model)
 }
 
 // SensitiveWordContains 是否包含敏感词，返回是否包含敏感词和敏感词列表
