@@ -89,12 +89,9 @@ const OperationSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = { ...inputs };
+      let newInputs = {};
       data.forEach((item) => {
-        if (!Object.prototype.hasOwnProperty.call(newInputs, item.key)) {
-          return;
-        }
-        if (typeof newInputs[item.key] === 'boolean') {
+        if (typeof inputs[item.key] === 'boolean') {
           newInputs[item.key] = toBoolean(item.value);
         } else {
           newInputs[item.key] = item.value;
