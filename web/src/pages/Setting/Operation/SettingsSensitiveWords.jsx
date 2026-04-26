@@ -202,7 +202,12 @@ export default function SettingsSensitiveWords(props) {
     }));
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    // Defer setValues to next tick so dynamic group/model rule fields are rendered first
+    setTimeout(() => {
+      if (refForm.current) {
+        refForm.current.setValues(currentInputs);
+      }
+    }, 0);
   }, [props.options]);
 
   return (
