@@ -176,13 +176,21 @@ export default function SettingsSensitiveWords(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = {
+      CheckSensitiveEnabled: false,
+      CheckSensitiveOnPromptEnabled: false,
+      SensitiveWords: '',
+      SensitiveWordsGlobal: '',
+      SensitiveWordsGroupRules: [],
+      SensitiveWordsModelRules: [],
+    };
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+      if (Object.prototype.hasOwnProperty.call(currentInputs, key)) {
         currentInputs[key] = props.options[key];
       }
     }
     const parsed = parseSensitiveRules(currentInputs.SensitiveWords || '');
+    currentInputs.SensitiveWords = currentInputs.SensitiveWords || '';
     currentInputs.SensitiveWordsGlobal = stringifyWords(parsed.global);
     currentInputs.SensitiveWordsGroupRules = parsed.group_rules.map((rule) => ({
       group: rule.group || '',
