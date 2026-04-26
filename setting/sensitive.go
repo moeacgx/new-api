@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 var CheckSensitiveEnabled = true
@@ -104,10 +106,14 @@ func SensitiveWordsToString() string {
 }
 
 func SensitiveWordsConfigToJSONString() string {
-	cfg := normalizeSensitiveRuleConfig(SensitiveRuleConfig{
-		Global: SensitiveWords,
-	})
-	b, err := json.Marshal(cfg)
+	cfg := SensitiveRuleConfig{Global: normalizeSensitiveWords(SensitiveWords)}
+	if raw, ok := common.OptionMap["SensitiveWords"]; ok {
+		parsed := ParseSensitiveRuleConfig(raw)
+		if len(parsed.Global) > 0 || len(parsed.GroupRules) > 0 || len(parsed.ModelRules) > 0 {
+			cfg = parsed
+		}
+	}
+	b, err := json.Marshal(normalizeSensitiveRuleConfig(cfg))
 	if err != nil {
 		return "{}"
 	}
@@ -154,7 +160,7 @@ func ParseSensitiveRuleConfig(raw string) SensitiveRuleConfig {
 }
 
 func GetEffectiveSensitiveWords(group string, model string) []string {
-	cfg := ParseSensitiveRuleConfig(SensitiveWordsConfigToJSONString())
+	cfg := ParseSensitiveRuleConfig(common.OptionMap["SensitiveWords"])
 	result := append([]string{}, cfg.Global...)
 	seen := make(map[string]struct{}, len(result))
 	for _, word := range result {
