@@ -52,14 +52,6 @@
 
 </div>
 
-## ⚠️ 分支说明
-
-> `main` 分支用于与上游保持同步，作为官方更新的参考线。
-> `custom-main` 分支用于当前生产环境的二次开发与定制维护。
-> 如需使用本仓库的定制版本，请选择 `custom-main`，不要直接使用 `main`。
-
----
-
 ## 📝 Project Description
 
 > [!IMPORTANT]
