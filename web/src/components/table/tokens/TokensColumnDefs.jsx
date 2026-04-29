@@ -353,6 +353,7 @@ const renderOperations = (
   text,
   record,
   onOpenLink,
+  openCCSwitchForRecord,
   setEditingToken,
   setShowEdit,
   manageToken,
@@ -409,6 +410,17 @@ const renderOperations = (
           ></Button>
         </Dropdown>
       </SplitButtonGroup>
+
+      <Button
+        size='small'
+        type='primary'
+        theme='light'
+        onClick={async () => {
+          await openCCSwitchForRecord(record);
+        }}
+      >
+        CCS
+      </Button>
 
       {record.status === 1 ? (
         <Button
@@ -474,6 +486,7 @@ export const getTokensColumns = ({
   toggleTokenVisibility,
   copyTokenKey,
   copyTokenConnectionString,
+  openCCSwitchForRecord,
   manageToken,
   onOpenLink,
   setEditingToken,
@@ -563,6 +576,7 @@ export const getTokensColumns = ({
           text,
           record,
           onOpenLink,
+          openCCSwitchForRecord,
           setEditingToken,
           setShowEdit,
           manageToken,

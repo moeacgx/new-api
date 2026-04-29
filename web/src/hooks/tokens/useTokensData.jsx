@@ -211,6 +211,13 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
     await copyText(connStr);
   };
 
+  const openCCSwitchForRecord = async (record) => {
+    const fullKey = await fetchTokenKey(record);
+    if (openCCSwitchModal) {
+      openCCSwitchModal(fullKey);
+    }
+  };
+
   // Open link function for chat integrations
   const onOpenLink = async (type, url, record) => {
     const fullKey = await fetchTokenKey(record);
@@ -494,6 +501,7 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
     toggleTokenVisibility,
     copyTokenKey,
     copyTokenConnectionString,
+    openCCSwitchForRecord,
     onOpenLink,
     manageToken,
     searchTokens,
