@@ -141,11 +141,17 @@ const ModelPricingTable = ({
         return (
           <div className='space-y-1'>
             {items.map((item) => (
-              <div key={item.key}>
+              <div key={item.key} className='space-y-0.5'>
                 <div className='font-semibold text-orange-600'>
                   {item.label} {item.value}
                 </div>
                 <div className='text-xs text-gray-500'>{item.suffix}</div>
+                {item.originalValue && siteDisplayType !== 'TOKENS' && (
+                  <div className='text-xs text-gray-400 line-through'>
+                    {t('原价')}：{item.originalValue}
+                    {item.suffix}
+                  </div>
+                )}
               </div>
             ))}
           </div>

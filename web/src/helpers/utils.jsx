@@ -618,6 +618,19 @@ export const calculateModelPrice = ({
   quotaDisplayType = 'USD',
   precision = 4,
 }) => {
+  const getDisplayGroups = (groups) => {
+    const filtered = (groups || []).filter((g) => g && g !== 'auto');
+    return filtered.length > 0 ? filtered : groups || [];
+  };
+
+  const stripTrailingZeros = (value) =>
+    String(value).replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+
+  const formatUsdOriginalPrice = (priceUSD, unitDivisor = 1) => {
+    const numericPrice = priceUSD / unitDivisor;
+    return `$${stripTrailingZeros(numericPrice.toFixed(precision))}`;
+  };
+
   // 1. 选择实际使用的分组
   let usedGroup = selectedGroup;
   let usedGroupRatio = groupRatio[selectedGroup];
@@ -625,11 +638,12 @@ export const calculateModelPrice = ({
   if (selectedGroup === 'all' || usedGroupRatio === undefined) {
     // 在模型可用分组中选择倍率最小的分组，若无则使用 1
     let minRatio = Number.POSITIVE_INFINITY;
+    const displayGroups = getDisplayGroups(record.enable_groups);
     if (
-      Array.isArray(record.enable_groups) &&
-      record.enable_groups.length > 0
+      Array.isArray(displayGroups) &&
+      displayGroups.length > 0
     ) {
-      record.enable_groups.forEach((g) => {
+      displayGroups.forEach((g) => {
         const r = groupRatio[g];
         if (r !== undefined && r < minRatio) {
           minRatio = r;
@@ -660,6 +674,7 @@ export const calculateModelPrice = ({
     // 按量计费
     const isTokensDisplay = quotaDisplayType === 'TOKENS';
     const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
+    const originalInputRatioPriceUSD = record.model_ratio * 2;
     const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
     const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
     const hasRatioValue = (value) =>
@@ -712,31 +727,78 @@ export const calculateModelPrice = ({
     };
 
     const inputPrice = formatTokenPrice(inputRatioPriceUSD);
+    const originalInputPrice = formatUsdOriginalPrice(
+      originalInputRatioPriceUSD,
+      unitDivisor,
+    );
+    const originalCompletionPrice = formatUsdOriginalPrice(
+      originalInputRatioPriceUSD * Number(record.completion_ratio),
+      unitDivisor,
+    );
+    const originalCachePrice = hasRatioValue(record.cache_ratio)
+      ? formatUsdOriginalPrice(
+          originalInputRatioPriceUSD * Number(record.cache_ratio),
+          unitDivisor,
+        )
+      : null;
+    const originalCreateCachePrice = hasRatioValue(record.create_cache_ratio)
+      ? formatUsdOriginalPrice(
+          originalInputRatioPriceUSD * Number(record.create_cache_ratio),
+          unitDivisor,
+        )
+      : null;
+    const originalImagePrice = hasRatioValue(record.image_ratio)
+      ? formatUsdOriginalPrice(
+          originalInputRatioPriceUSD * Number(record.image_ratio),
+          unitDivisor,
+        )
+      : null;
+    const originalAudioInputPrice = hasRatioValue(record.audio_ratio)
+      ? formatUsdOriginalPrice(
+          originalInputRatioPriceUSD * Number(record.audio_ratio),
+          unitDivisor,
+        )
+      : null;
     const audioInputPrice = hasRatioValue(record.audio_ratio)
       ? formatTokenPrice(inputRatioPriceUSD * Number(record.audio_ratio))
       : null;
 
     return {
       inputPrice,
+      originalInputPrice,
       completionPrice: formatTokenPrice(
         inputRatioPriceUSD * Number(record.completion_ratio),
       ),
+      originalCompletionPrice,
       cachePrice: hasRatioValue(record.cache_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.cache_ratio))
         : null,
+      originalCachePrice,
       createCachePrice: hasRatioValue(record.create_cache_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
         : null,
+      originalCreateCachePrice,
       imagePrice: hasRatioValue(record.image_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.image_ratio))
         : null,
+      originalImagePrice,
       audioInputPrice,
+      originalAudioInputPrice,
       audioOutputPrice:
         audioInputPrice && hasRatioValue(record.audio_completion_ratio)
           ? formatTokenPrice(
               inputRatioPriceUSD *
                 Number(record.audio_ratio) *
                 Number(record.audio_completion_ratio),
+            )
+          : null,
+      originalAudioOutputPrice:
+        originalAudioInputPrice && hasRatioValue(record.audio_completion_ratio)
+          ? formatUsdOriginalPrice(
+              originalInputRatioPriceUSD *
+                Number(record.audio_ratio) *
+                Number(record.audio_completion_ratio),
+              unitDivisor,
             )
           : null,
       unitLabel,
@@ -754,6 +816,7 @@ export const calculateModelPrice = ({
 
     return {
       price: displayVal,
+      originalPrice: formatUsdOriginalPrice(parseFloat(record.model_price) || 0),
       isPerToken: false,
       isTokensDisplay: false,
       usedGroup,
@@ -846,42 +909,49 @@ export const getModelPriceItems = (
         label: t('输入价格'),
         value: priceData.inputPrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalInputPrice,
       },
       {
         key: 'completion',
         label: t('补全价格'),
         value: priceData.completionPrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalCompletionPrice,
       },
       {
         key: 'cache',
         label: t('缓存读取价格'),
         value: priceData.cachePrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalCachePrice,
       },
       {
         key: 'create-cache',
         label: t('缓存创建价格'),
         value: priceData.createCachePrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalCreateCachePrice,
       },
       {
         key: 'image',
         label: t('图片输入价格'),
         value: priceData.imagePrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalImagePrice,
       },
       {
         key: 'audio-input',
         label: t('音频输入价格'),
         value: priceData.audioInputPrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalAudioInputPrice,
       },
       {
         key: 'audio-output',
         label: t('音频补全价格'),
         value: priceData.audioOutputPrice,
         suffix: unitSuffix,
+        originalValue: priceData.originalAudioOutputPrice,
       },
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   }
@@ -892,6 +962,7 @@ export const getModelPriceItems = (
       label: t('模型价格'),
       value: priceData.price,
       suffix: ` / ${t('次')}`,
+      originalValue: priceData.originalPrice,
     },
   ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
 };
@@ -994,9 +1065,31 @@ export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
   return (
     <>
       {items.map((item) => (
-        <span key={item.key} style={{ color: 'var(--semi-color-text-1)' }}>
-          {item.label} {item.value}
-          {item.suffix}
+        <span
+          key={item.key}
+          style={{
+            color: 'var(--semi-color-text-1)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+          }}
+        >
+          <span>
+            {item.label} {item.value}
+            {item.suffix}
+          </span>
+          {item.originalValue && quotaDisplayType !== 'TOKENS' && (
+            <span
+              style={{
+                color: 'var(--semi-color-text-2)',
+                fontSize: 11,
+                textDecoration: 'line-through',
+              }}
+            >
+              {t('原价')}：{item.originalValue}
+              {item.suffix}
+            </span>
+          )}
         </span>
       ))}
     </>

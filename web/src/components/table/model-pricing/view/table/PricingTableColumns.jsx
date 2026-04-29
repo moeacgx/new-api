@@ -239,9 +239,17 @@ export const getPricingTableColumns = ({
       return (
         <div className='space-y-1'>
           {priceItems.map((item) => (
-            <div key={item.key} className='text-gray-700'>
-              {item.label} {item.value}
-              {item.suffix}
+            <div key={item.key} className='space-y-0.5'>
+              <div className='text-gray-700'>
+                {item.label} {item.value}
+                {item.suffix}
+              </div>
+              {item.originalValue && siteDisplayType !== 'TOKENS' && (
+                <div className='text-xs text-gray-400 line-through'>
+                  {t('原价')}：{item.originalValue}
+                  {item.suffix}
+                </div>
+              )}
             </div>
           ))}
         </div>
