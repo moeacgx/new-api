@@ -411,16 +411,19 @@ const renderOperations = (
         </Dropdown>
       </SplitButtonGroup>
 
-      <Button
-        size='small'
-        type='primary'
-        theme='light'
-        onClick={async () => {
-          await openCCSwitchForRecord(record);
-        }}
-      >
-        CCS
-      </Button>
+      <Tooltip content={t('填入 CC Switch')} position='top' showArrow>
+        <Button
+          size='small'
+          type='primary'
+          theme='solid'
+          style={{ fontWeight: 600, letterSpacing: '0.02em' }}
+          onClick={async () => {
+            await openCCSwitchForRecord(record);
+          }}
+        >
+          CCS
+        </Button>
+      </Tooltip>
 
       {record.status === 1 ? (
         <Button
