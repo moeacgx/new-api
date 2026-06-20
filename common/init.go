@@ -207,4 +207,15 @@ func initConstantEnv() {
 		}
 	}
 	constant.TrustedRedirectDomains = trustedDomains
+
+	// Initialize allowed credentialed CORS origins.
+	corsAllowedOriginsStr := GetEnvOrDefaultString("CORS_ALLOWED_ORIGINS", "")
+	var corsAllowedOrigins []string
+	for _, origin := range strings.Split(corsAllowedOriginsStr, ",") {
+		trimmedOrigin := strings.TrimSpace(origin)
+		if trimmedOrigin != "" {
+			corsAllowedOrigins = append(corsAllowedOrigins, strings.ToLower(trimmedOrigin))
+		}
+	}
+	constant.CORSAllowedOrigins = corsAllowedOrigins
 }
