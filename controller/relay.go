@@ -94,14 +94,32 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
 			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
-				})
+				if c.Writer.Written() && c.GetBool("event_stream_headers_set") {
+					// Response already committed as SSE (e.g. ping flushed
+					// 200 text/event-stream).  Send error as SSE event.
+					helper.WriteSSEError(c, gin.H{
+						"type":  "error",
+						"error": newAPIError.ToClaudeError(),
+					})
+				} else if !c.Writer.Written() {
+					c.JSON(newAPIError.StatusCode, gin.H{
+						"type":  "error",
+						"error": newAPIError.ToClaudeError(),
+					})
+				}
+				// else: Written but not SSE — response already committed in
+				// an unknown format; writing anything would corrupt it.
+				// Error is already logged above.
 			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
-				})
+				if c.Writer.Written() && c.GetBool("event_stream_headers_set") {
+					helper.WriteSSEError(c, gin.H{
+						"error": newAPIError.ToOpenAIError(),
+					})
+				} else if !c.Writer.Written() {
+					c.JSON(newAPIError.StatusCode, gin.H{
+						"error": newAPIError.ToOpenAIError(),
+					})
+				}
 			}
 		}
 	}()
@@ -368,6 +386,12 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
 		return retryDecision{Reason: "nil_error"}
+	}
+	// Once response bytes have been flushed to the client (e.g. SSE ping
+	// or partial stream data), retrying on a different channel is pointless
+	// — we cannot rewrite the HTTP status code or headers.
+	if c.Writer.Written() {
+		return retryDecision{Reason: "response_already_written"}
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return retryDecision{Reason: "channel_affinity_skip"}

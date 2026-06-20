@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/imageutil"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
@@ -203,10 +204,8 @@ func miniMaxImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.Writer.WriteHeader(resp.StatusCode)
-	if _, err := c.Writer.Write(jsonResponse); err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	if apiErr := imageutil.WriteResponseBytes(c, resp, info, jsonResponse); apiErr != nil {
+		return nil, apiErr
 	}
 
 	return &dto.Usage{}, nil

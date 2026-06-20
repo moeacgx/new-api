@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -112,6 +114,39 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 	_ = FlushWriter(c)
 }
 
+func EventData(c *gin.Context, eventName string, data string) error {
+	if strings.TrimSpace(eventName) == "" {
+		return StringData(c, data)
+	}
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
+	if blocked, err := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", eventName), data); blocked || err != nil {
+		return err
+	}
+	return FlushWriter(c)
+}
+
+func FinalEventData(c *gin.Context, eventName string, data string) error {
+	eventName = strings.TrimSpace(eventName)
+	if err := EventData(c, eventName, data); err != nil {
+		return err
+	}
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
+	items := service.FlushSensitiveStreamDataForSend(c)
+	if len(items) == 0 {
+		return nil
+	}
+	if eventName == "" {
+		writeStreamDataItems(c, items)
+		return FlushWriter(c)
+	}
+	writeFilteredEventDataItems(c, fmt.Sprintf("event: %s\n", eventName), items)
+	return FlushWriter(c)
+}
+
 func StringData(c *gin.Context, str string) error {
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
@@ -151,6 +186,25 @@ func PingData(c *gin.Context) error {
 		return fmt.Errorf("write ping data failed: %w", err)
 	}
 	return FlushWriter(c)
+}
+
+func PingDataWithWriteDeadline(c *gin.Context, timeout time.Duration) error {
+	if c == nil || c.Writer == nil {
+		return errors.New("context or writer is nil")
+	}
+	if timeout <= 0 {
+		return PingData(c)
+	}
+
+	rc := http.NewResponseController(c.Writer)
+	if err := rc.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		logger.LogDebug(c, "set ping write deadline failed: %s", err.Error())
+	}
+	err := PingData(c)
+	if resetErr := rc.SetWriteDeadline(time.Time{}); resetErr != nil {
+		logger.LogDebug(c, "reset ping write deadline failed: %s", resetErr.Error())
+	}
+	return err
 }
 
 func ObjectData(c *gin.Context, object interface{}) error {
@@ -198,6 +252,56 @@ func writeFilteredEventDataItems(c *gin.Context, eventLine string, items []strin
 func writeSensitiveStreamErrorEvent(c *gin.Context) {
 	c.Render(-1, common.CustomEvent{Data: "event: error\n"})
 	c.Render(-1, common.CustomEvent{Data: "data: " + string(service.SensitiveFilterOpenAIErrorBody(c))})
+}
+
+// WriteSSEError writes an error as an SSE event to an already-committed
+// event-stream response.  Call this instead of c.JSON() when
+// c.Writer.Written() is true — at that point the HTTP status code and
+// Content-Type headers are already on the wire and cannot be changed.
+//
+// The errorPayload is marshaled to JSON and sent as:
+//
+//	event: error
+//	data: <json>
+//
+// This follows the same format as writeSensitiveStreamErrorEvent and is
+// compatible with OpenAI SDK streaming error handling.
+func WriteSSEError(c *gin.Context, errorPayload any) {
+	// If the client already disconnected, don't bother writing.
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		logger.LogDebug(c, "WriteSSEError: client already disconnected, skipping")
+		return
+	}
+
+	errBody, err := common.Marshal(errorPayload)
+	if err != nil {
+		errBody = []byte(`{"error":{"message":"internal error","type":"server_error"}}`)
+	}
+	c.Render(-1, common.CustomEvent{Data: "event: error\n"})
+	c.Render(-1, common.CustomEvent{Data: "data: " + string(errBody)})
+	if err := FlushWriter(c); err != nil {
+		logger.LogDebug(c, "WriteSSEError: flush failed: %s", err.Error())
+	}
+	// Send [DONE] terminator so clients cleanly close the stream.
+	// Use StringData directly instead of Done() because Done() has
+	// sensitive-filter flush logic that is irrelevant on error paths.
+	_ = StringData(c, "[DONE]")
+}
+
+// StopImagePingIfRunning stops the synthetic-stream image ping goroutine
+// stored in the "stop_image_ping" context key, if it is still running.
+// It is safe to call multiple times — the second call is a no-op.
+//
+// Two call sites:
+//   - imageutil.WriteResponseBytes — right before writing SSE data events,
+//     so ping and data writes never race on c.Writer.
+//   - image_handler.go defer — safety net for error/panic paths where
+//     WriteResponseBytes is never reached.
+func StopImagePingIfRunning(c *gin.Context) {
+	if v, ok := c.Get("stop_image_ping"); ok && v != nil {
+		v.(func())()
+		c.Set("stop_image_ping", nil)
+	}
 }
 
 func Done(c *gin.Context) {

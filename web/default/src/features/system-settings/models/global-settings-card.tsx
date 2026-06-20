@@ -94,6 +94,7 @@ const schema = z.object({
   general_setting: z.object({
     ping_interval_enabled: z.boolean(),
     ping_interval_seconds: z.coerce.number().min(1),
+    image_synthetic_stream_enabled: z.boolean(),
   }),
 })
 
@@ -106,6 +107,7 @@ type FlatGlobalModelSettings = {
   'global.chat_completions_to_responses_policy': string
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
+  'general_setting.image_synthetic_stream_enabled': boolean
 }
 
 const flattenGlobalValues = (
@@ -125,6 +127,8 @@ const flattenGlobalValues = (
     values.general_setting.ping_interval_enabled,
   'general_setting.ping_interval_seconds':
     values.general_setting.ping_interval_seconds,
+  'general_setting.image_synthetic_stream_enabled':
+    values.general_setting.image_synthetic_stream_enabled,
 })
 
 function normalizeJsonText(value: string, fallback: string) {
@@ -401,6 +405,31 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                 </FormDescription>
                 <FormMessage />
               </FormItem>
+            )}
+          />
+
+          <Separator />
+
+          <FormField
+            control={form.control}
+            name='general_setting.image_synthetic_stream_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Image Synthetic Stream Keep-alive')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When the client requests streaming but the upstream does not support it, wrap the response as SSE and send keep-alive pings to prevent reverse-proxy timeouts.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
             )}
           />
         </SettingsForm>
