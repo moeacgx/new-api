@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relay/imageutil"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/QuantumNous/new-api/types"
@@ -192,6 +194,124 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	return usage, nil
+}
+
+func OpenAIImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	if info != nil && info.ImageClientStream {
+		if resp == nil {
+			return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		if info.ImageUpstreamStream && strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+			return OpenAIImageStreamHandler(c, info, resp)
+		}
+		return OpenAIImageSyntheticStreamHandler(c, info, resp)
+	}
+	return OpenaiHandlerWithUsage(c, info, resp)
+}
+
+type imageStreamEvent struct {
+	Type  string     `json:"type"`
+	Usage *dto.Usage `json:"usage,omitempty"`
+}
+
+func extractImageStreamUsage(data string, usage *dto.Usage) {
+	if usage == nil || strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "[DONE]" {
+		return
+	}
+	var event imageStreamEvent
+	if err := common.UnmarshalJsonStr(data, &event); err != nil {
+		return
+	}
+	if event.Usage != nil {
+		*usage = *event.Usage
+		imageutil.NormalizeUsage(usage)
+	}
+}
+
+func OpenAIImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+
+	usage := &dto.Usage{}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.DefaultMaxScannerBufferSize)
+	helper.SetEventStreamHeaders(c)
+
+	var eventName string
+	var dataLines []string
+	flushEvent := func() error {
+		if len(dataLines) == 0 {
+			eventName = ""
+			return nil
+		}
+		data := strings.Join(dataLines, "\n")
+		extractImageStreamUsage(data, usage)
+		if strings.TrimSpace(data) == "[DONE]" {
+			return helper.StringData(c, data)
+		}
+		if eventName == "" {
+			var event imageStreamEvent
+			if err := common.UnmarshalJsonStr(data, &event); err == nil {
+				eventName = event.Type
+			}
+		}
+		if err := helper.FinalEventData(c, eventName, data); err != nil {
+			return err
+		}
+		eventName = ""
+		dataLines = nil
+		return nil
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		if line == "" {
+			if err := flushEvent(); err != nil {
+				return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			info.SetFirstResponseTime()
+			info.ReceivedResponseCount++
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if err := flushEvent(); err != nil {
+		return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	if err := scanner.Err(); err != nil {
+		return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	applyUsagePostProcessing(info, usage, nil)
+	return usage, nil
+}
+
+func OpenAIImageSyntheticStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	defer service.CloseResponseBodyGracefully(resp)
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	}
+	var usageResp dto.SimpleResponse
+	if err := common.Unmarshal(responseBody, &usageResp); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	if apiErr := imageutil.WriteResponseBytes(c, resp, info, responseBody); apiErr != nil {
+		return nil, apiErr
+	}
+
+	imageutil.NormalizeUsage(&usageResp.Usage)
+	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
+	return &usageResp.Usage, nil
 }
 
 // convertSSEToJSON merges SSE stream chunks into a single non-streaming JSON response.

@@ -44,8 +44,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	adaptor.Init(info)
 
 	var requestBody io.Reader
+	info.ImageClientStream = request.IsStream(c)
+	info.ImageUpstreamStream = shouldUseNativeOpenAIImageStream(info)
+	rewriteImageStreamFields := imageStreamFieldsNeedRewrite(request, info.ImageClientStream, info.ImageUpstreamStream)
+	if info.ImageClientStream {
+		info.DisablePing = true
+	}
+	info.IsStream = info.ImageUpstreamStream
+	prepareImageStreamRequest(request, info.ImageUpstreamStream)
 
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) && !info.ImageClientStream && !rewriteImageStreamFields {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -158,4 +166,43 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
+}
+
+func prepareImageStreamRequest(request *dto.ImageRequest, upstreamStream bool) {
+	if request == nil {
+		return
+	}
+	if upstreamStream {
+		request.Stream = common.GetPointer(true)
+		return
+	}
+	request.Stream = nil
+	request.PartialImages = nil
+}
+
+func imageStreamFieldsNeedRewrite(request *dto.ImageRequest, clientStream bool, upstreamStream bool) bool {
+	if request == nil {
+		return false
+	}
+	if clientStream {
+		return true
+	}
+	if request.PartialImagesExplicit {
+		return true
+	}
+	return request.StreamExplicit && !upstreamStream
+}
+
+func shouldUseNativeOpenAIImageStream(info *relaycommon.RelayInfo) bool {
+	if info == nil || !info.ImageClientStream || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.ImagesNativeStreamEnabled
+}
+
+func isEventStreamResponse(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 }

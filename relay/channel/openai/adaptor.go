@@ -462,12 +462,18 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" {
+				if key == "model" || key == "stream" || key == "partial_images" {
 					continue
 				}
 				for _, value := range values {
 					writer.WriteField(key, value)
 				}
+			}
+		}
+		if info.ImageUpstreamStream {
+			writer.WriteField("stream", "true")
+			if request.PartialImages != nil {
+				writer.WriteField("partial_images", fmt.Sprintf("%d", *request.PartialImages))
 			}
 		}
 
@@ -639,7 +645,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	case relayconstant.RelayModeAudioTranscription:
 		err, usage = OpenaiSTTHandler(c, resp, info, a.ResponseFormat)
 	case relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits:
-		usage, err = OpenaiHandlerWithUsage(c, info, resp)
+		usage, err = OpenAIImageHandler(c, info, resp)
 	case relayconstant.RelayModeRerank:
 		usage, err = common_handler.RerankHandler(c, info, resp)
 	case relayconstant.RelayModeResponses:

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -110,6 +111,39 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return
 	}
 	_ = FlushWriter(c)
+}
+
+func EventData(c *gin.Context, eventName string, data string) error {
+	if strings.TrimSpace(eventName) == "" {
+		return StringData(c, data)
+	}
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
+	if blocked, err := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", eventName), data); blocked || err != nil {
+		return err
+	}
+	return FlushWriter(c)
+}
+
+func FinalEventData(c *gin.Context, eventName string, data string) error {
+	eventName = strings.TrimSpace(eventName)
+	if err := EventData(c, eventName, data); err != nil {
+		return err
+	}
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
+	items := service.FlushSensitiveStreamDataForSend(c)
+	if len(items) == 0 {
+		return nil
+	}
+	if eventName == "" {
+		writeStreamDataItems(c, items)
+		return FlushWriter(c)
+	}
+	writeFilteredEventDataItems(c, fmt.Sprintf("event: %s\n", eventName), items)
+	return FlushWriter(c)
 }
 
 func StringData(c *gin.Context, str string) error {
