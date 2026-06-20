@@ -89,6 +89,13 @@ func WriteResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 func WriteResponseBytes(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseBody []byte) *types.NewAPIError {
 	if info != nil && info.ImageClientStream {
 		helper.SetEventStreamHeaders(c)
+		// Stop the synthetic-stream ping goroutine (if running) before
+		// writing SSE data events.  The ping covered the upstream wait
+		// (DoRequest) and body download (ReadAll in DoResponse); now we
+		// take over the SSE stream with actual image data.  Stopping
+		// here prevents concurrent writes to c.Writer between the ping
+		// goroutine and the data-event writes below.
+		helper.StopImagePingIfRunning(c)
 		if apiErr := writeCompletedEvents(c, info, responseBody); apiErr != nil {
 			return apiErr
 		}
