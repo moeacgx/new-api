@@ -144,10 +144,12 @@ func OidcAuth(c *gin.Context) {
 	} else {
 		if common.RegisterEnabled {
 			user.Email = oidcUser.Email
-			if oidcUser.PreferredUsername != "" {
-				user.Username = oidcUser.PreferredUsername
-			} else {
-				user.Username = "oidc_" + strconv.Itoa(model.GetMaxUserId()+1)
+			user.Username = "oidc_" + strconv.Itoa(model.GetMaxUserId()+1)
+			if oidcUser.PreferredUsername != "" &&
+				len(oidcUser.PreferredUsername) <= model.UserNameMaxLength {
+				if exists, err := model.CheckUserExistOrDeleted(oidcUser.PreferredUsername, ""); err == nil && !exists {
+					user.Username = oidcUser.PreferredUsername
+				}
 			}
 			if oidcUser.Name != "" {
 				user.DisplayName = oidcUser.Name
