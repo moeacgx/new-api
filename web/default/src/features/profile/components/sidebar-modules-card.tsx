@@ -61,6 +61,23 @@ const createDefaultConfig = (sectionDefs: SectionDef[]): SidebarModulesConfig =>
     return defaults
   }, {})
 
+const pruneConfigToSections = (
+  config: SidebarModulesConfig,
+  sectionDefs: SectionDef[]
+): SidebarModulesConfig => {
+  const source = config && typeof config === 'object' ? config : {}
+  return sectionDefs.reduce<SidebarModulesConfig>((next, section) => {
+    const currentSection = source[section.key]
+    next[section.key] = {
+      enabled: currentSection?.enabled ?? true,
+    }
+    section.modules.forEach((module) => {
+      next[section.key][module.key] = currentSection?.[module.key] ?? true
+    })
+    return next
+  }, {})
+}
+
 export function SidebarModulesCard() {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
@@ -68,13 +85,13 @@ export function SidebarModulesCard() {
   const currentUser = useAuthStore((s) => s.auth.user)
   const setUser = useAuthStore((s) => s.auth.setUser)
   const { status } = useStatus()
-  const customSidebarItems = useMemo(
-    () =>
-      parseCustomNavItems(
-        parseSidebarModulesFromStatus(status as Record<string, unknown> | null)
-          .customItems
-      ),
+  const adminSidebarModules = useMemo(
+    () => parseSidebarModulesFromStatus(status as Record<string, unknown> | null),
     [status]
+  )
+  const customSidebarItems = useMemo(
+    () => parseCustomNavItems(adminSidebarModules.customItems),
+    [adminSidebarModules.customItems]
   )
 
   const sectionDefs = useMemo<SectionDef[]>(
@@ -159,25 +176,52 @@ export function SidebarModulesCard() {
     [t]
   )
 
-  const effectiveSectionDefs = useMemo<SectionDef[]>(
-    () =>
-      customSidebarItems.length === 0
-        ? sectionDefs
-        : [
-            ...sectionDefs,
-            {
-              key: 'custom',
-              title: t('Custom menu items'),
-              description: t('Managed links added by the administrator.'),
-              modules: customSidebarItems.map((item) => ({
-                key: getSidebarCustomModuleKey(item.id),
-                title: item.title,
-                description: item.url,
-              })),
-            },
-          ],
-    [customSidebarItems, sectionDefs, t]
-  )
+  const adminFilteredSectionDefs = useMemo<SectionDef[]>(() => {
+    const visibleSections = sectionDefs
+      .map((section) => {
+        const adminSection = adminSidebarModules[section.key]
+        if (Array.isArray(adminSection)) return null
+        if (adminSection?.enabled === false) return null
+
+        const modules = section.modules.filter(
+          (module) => adminSection?.[module.key] !== false
+        )
+        if (modules.length === 0) return null
+        return { ...section, modules }
+      })
+      .filter((section): section is SectionDef => Boolean(section))
+
+    const adminCustomSection = adminSidebarModules.custom
+    const customModules =
+      !Array.isArray(adminCustomSection) && adminCustomSection?.enabled === false
+        ? []
+        : customSidebarItems
+            .filter(
+              (item) =>
+                !adminCustomSection ||
+                Array.isArray(adminCustomSection) ||
+                adminCustomSection[getSidebarCustomModuleKey(item.id)] !== false
+            )
+            .map((item) => ({
+              key: getSidebarCustomModuleKey(item.id),
+              title: item.title,
+              description: item.url,
+            }))
+
+    if (customModules.length === 0) return visibleSections
+
+    return [
+      ...visibleSections,
+      {
+        key: 'custom',
+        title: t('Custom menu items'),
+        description: t('Managed links added by the administrator.'),
+        modules: customModules,
+      },
+    ]
+  }, [adminSidebarModules, customSidebarItems, sectionDefs, t])
+
+  const effectiveSectionDefs = adminFilteredSectionDefs
 
   const defaultConfig = useMemo(
     () => createDefaultConfig(effectiveSectionDefs),
@@ -190,7 +234,7 @@ export function SidebarModulesCard() {
       if (res.data.success && res.data.data?.sidebar_modules) {
         const raw = res.data.data.sidebar_modules
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-        setConfig(parsed)
+        setConfig(pruneConfigToSections(parsed, effectiveSectionDefs))
       } else {
         setConfig(defaultConfig)
       }
@@ -224,7 +268,9 @@ export function SidebarModulesCard() {
   const handleSave = async () => {
     setLoading(true)
     try {
-      const serialized = JSON.stringify(config)
+      const serialized = JSON.stringify(
+        pruneConfigToSections(config, effectiveSectionDefs)
+      )
       const res = await api.put('/api/user/self', {
         sidebar_modules: serialized,
       })
