@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -154,6 +155,22 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			if formData.Has("stream") {
+				stream, err := strconv.ParseBool(formData.Get("stream"))
+				if err != nil {
+					return nil, errors.New("stream must be a boolean")
+				}
+				imageRequest.Stream = &stream
+				imageRequest.StreamExplicit = true
+			}
+			if formData.Has("partial_images") {
+				partialImages, err := strconv.Atoi(formData.Get("partial_images"))
+				if err != nil {
+					return nil, errors.New("partial_images must be an integer")
+				}
+				imageRequest.PartialImages = &partialImages
+				imageRequest.PartialImagesExplicit = true
+			}
 			if imageValue := formData.Get("image"); imageValue != "" {
 				imageRequest.Image, _ = common.Marshal(imageValue)
 			}
@@ -221,6 +238,16 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		if imageRequest.N == nil || *imageRequest.N == 0 {
 			imageRequest.N = common.GetPointer(uint(1))
 		}
+	}
+
+	if imageRequest.Stream == nil {
+		imageRequest.Stream = common.GetPointer(false)
+	}
+	if !*imageRequest.Stream {
+		imageRequest.PartialImages = nil
+	}
+	if imageRequest.PartialImages != nil && (*imageRequest.PartialImages < 0 || *imageRequest.PartialImages > 3) {
+		return nil, errors.New("partial_images must be between 0 and 3")
 	}
 
 	return imageRequest, nil
