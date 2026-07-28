@@ -113,10 +113,10 @@ export function SecurityAuditPolicyView({
     <div className='grid gap-4 xl:grid-cols-2'>
       <div className='flex flex-col gap-4'>
         <FieldSet className='rounded-xl border p-4'>
-          <FieldLegend>{t('Audit mode')}</FieldLegend>
+          <FieldLegend>{t('Prompt Guard mode')}</FieldLegend>
           <FieldDescription>
             {t(
-              'Choose whether requests bypass Guard, audit asynchronously, or block until Guard returns.'
+              'Choose whether requests bypass Guard, audit asynchronously, or block until Guard returns. Built-in policies remain independent.'
             )}
           </FieldDescription>
           <FieldGroup>

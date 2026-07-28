@@ -42,15 +42,19 @@ func PromptAuditRealtime() gin.HandlerFunc {
 			mode = service.PromptAuditModeBlocking
 		}
 		shouldAudit, groupId, groupName := promptAuditResolveGroupScope(c, cfg)
-		if mode == service.PromptAuditModeOff || !shouldAudit {
+		guardActive := mode != service.PromptAuditModeOff && shouldAudit
+		sensitiveActive := service.ShouldCheckSensitiveBeforeDistribution(c)
+		if !guardActive && !sensitiveActive {
 			c.Next()
 			return
 		}
-		common.SetContextKey(c, constant.ContextKeyPromptAuditGroupId, groupId)
-		common.SetContextKey(c, constant.ContextKeyPromptAuditGroupName, groupName)
-		// 只有本次连接在渠道分配前完成了首帧门禁，后续帧才继续逐帧审计。
-		// 该标记同时防止关闭模式或未命中分组范围的连接在渠道分配后被意外审计。
-		common.SetContextKey(c, constant.ContextKeyPromptAuditRealtimeActive, true)
+		if guardActive {
+			common.SetContextKey(c, constant.ContextKeyPromptAuditGroupId, groupId)
+			common.SetContextKey(c, constant.ContextKeyPromptAuditGroupName, groupName)
+			// 只有本次连接在渠道分配前完成了首帧 Guard 门禁，后续帧
+			// 才继续逐帧 Guard；内置屏蔽词不依赖这个开关。
+			common.SetContextKey(c, constant.ContextKeyPromptAuditRealtimeActive, true)
+		}
 
 		clientConn, err := promptAuditRealtimeUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
@@ -60,7 +64,7 @@ func PromptAuditRealtime() gin.HandlerFunc {
 		defer clientConn.Close()
 		common.SetContextKey(c, constant.ContextKeyPromptAuditRealtimeClientWs, clientConn)
 
-		if cfgErr != nil && mode == service.PromptAuditModeBlocking {
+		if guardActive && cfgErr != nil && mode == service.PromptAuditModeBlocking {
 			writePromptAuditRealtimeDecision(c, clientConn, service.PromptAuditDecision{
 				Allow: false, ErrorCode: service.PromptGuardUnavailableCode,
 				HTTPStatus: http.StatusServiceUnavailable,
@@ -124,20 +128,53 @@ func PromptAuditRealtime() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			decision, _, auditErr := service.AuditPromptRealtimeFrame(
-				c.Request.Context(), promptAuditRealtimeRequest(c, payload, groupId, groupName),
-			)
-			if auditErr != nil {
-				writePromptAuditRealtimeProtocolError(c, clientConn,
-					"Realtime 客户端帧格式无效", types.ErrorCodeInvalidRequest,
-					websocket.CloseInvalidFramePayloadData, "invalid_realtime_frame")
-				c.Abort()
-				return
+			// 屏蔽词 mask 可以改写实际转发帧，但 Guard 必须继续审核
+			// 客户端提交的原始文本，避免替换内容掩盖语义风险。
+			guardPayload := append([]byte(nil), payload...)
+			if sensitiveActive {
+				filterResult, filteredPayload, filterErr := service.ApplySensitiveFilterToRealtimeRequestFrameBeforeDistribution(c, payload)
+				if filterErr != nil {
+					writePromptAuditRealtimeProtocolError(c, clientConn,
+						"Realtime 客户端帧格式无效", types.ErrorCodeInvalidRequest,
+						websocket.CloseInvalidFramePayloadData, "invalid_realtime_frame")
+					c.Abort()
+					return
+				}
+				if filterResult.Blocked {
+					writePromptAuditRealtimeProtocolError(c, clientConn,
+						"sensitive words detected", types.ErrorCodeSensitiveWordsDetected,
+						4403, string(types.ErrorCodeSensitiveWordsDetected))
+					c.Abort()
+					return
+				}
+				adjustedBytes := bufferedBytes - int64(len(payload)) + int64(len(filteredPayload))
+				if adjustedBytes > bufferLimit {
+					writePromptAuditRealtimeProtocolError(c, clientConn,
+						"Realtime 首轮缓冲数据超过大小限制", types.ErrorCodeInvalidRequest,
+						websocket.CloseMessageTooBig, "realtime_audit_buffer_too_large")
+					c.Abort()
+					return
+				}
+				bufferedBytes = adjustedBytes
+				payload = filteredPayload
+				bufferedFrames[len(bufferedFrames)-1].Payload = append([]byte(nil), payload...)
 			}
-			if !decision.Allow {
-				writePromptAuditRealtimeDecision(c, clientConn, decision)
-				c.Abort()
-				return
+			if guardActive {
+				decision, _, auditErr := service.AuditPromptRealtimeFrame(
+					c.Request.Context(), promptAuditRealtimeRequest(c, guardPayload, groupId, groupName),
+				)
+				if auditErr != nil {
+					writePromptAuditRealtimeProtocolError(c, clientConn,
+						"Realtime 客户端帧格式无效", types.ErrorCodeInvalidRequest,
+						websocket.CloseInvalidFramePayloadData, "invalid_realtime_frame")
+					c.Abort()
+					return
+				}
+				if !decision.Allow {
+					writePromptAuditRealtimeDecision(c, clientConn, decision)
+					c.Abort()
+					return
+				}
 			}
 
 			common.SetContextKey(c, constant.ContextKeyPromptAuditRealtimeBufferedFrames, bufferedFrames)

@@ -127,6 +127,46 @@ func TestApplySensitiveFilterToRequestBodyBlocksBeforeMasking(t *testing.T) {
 	assert.Contains(t, storedBody(t, c), "secret")
 }
 
+func TestApplySensitiveFilterToRealtimeRequestFrameMasksBeforeUpstream(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{{
+		ID: "realtime-mask", Name: "Realtime Mask", Enabled: true,
+		Action: setting.SensitiveRuleActionMask, Scope: setting.SensitiveRuleScopeRequest,
+		Replacement: "[MASK]", Keywords: []string{"frame-secret"},
+	}})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	c.Request.URL.Path = "/v1/realtime"
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, rewritten, err := ApplySensitiveFilterToRealtimeRequestFrame(c, []byte(
+		`{"type":"session.update","session":{"instructions":"frame-secret","input_audio_format":"pcm16"}}`,
+	))
+	require.NoError(t, err)
+	require.True(t, result.Mutated)
+	require.False(t, result.Blocked)
+	require.Contains(t, string(rewritten), "[MASK]")
+	require.NotContains(t, string(rewritten), "frame-secret")
+}
+
+func TestApplySensitiveFilterToRealtimeResponseFrameBlocksDelta(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{{
+		ID: "realtime-block", Name: "Realtime Block", Enabled: true,
+		Action: setting.SensitiveRuleActionBlock, Scope: setting.SensitiveRuleScopeResponse,
+		Keywords: []string{"unsafe-delta"},
+	}})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	c.Request.URL.Path = "/v1/realtime"
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+	original := []byte(`{"type":"response.output_text.delta","delta":"unsafe-delta"}`)
+
+	result, rewritten, err := ApplySensitiveFilterToRealtimeResponseFrame(c, original)
+	require.NoError(t, err)
+	require.True(t, result.Blocked)
+	require.False(t, result.Mutated)
+	require.Equal(t, original, rewritten)
+}
+
 func TestApplySensitiveFilterToRequestBodyMasksPromptFields(t *testing.T) {
 	withRequestFilterRules(t, []setting.SensitiveRule{
 		{

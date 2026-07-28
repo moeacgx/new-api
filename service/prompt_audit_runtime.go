@@ -189,8 +189,9 @@ func buildPromptAuditEvent(snapshot PromptAuditSnapshot, configVersion int64, re
 		Endpoint: snapshot.Endpoint, Protocol: snapshot.Protocol, Model: snapshot.Model,
 		PromptHash: snapshot.PromptHash, RedactedPreview: snapshot.RedactedPreview,
 		PromptCiphertext: model.PromptAuditLargeText(ciphertext), PromptCipherKind: model.PromptAuditCipherKindPrompt,
-		PromptLength:    snapshot.PromptLength,
-		PromptTruncated: snapshot.PromptTruncated, MessageCount: snapshot.MessageCount,
+		PromptLength: snapshot.PromptLength, PromptTruncated: snapshot.PromptTruncated,
+		PromptAvailable: ciphertext != "", MessageCount: snapshot.MessageCount,
+		Source: PromptAuditSourceGuard, Stage: normalizeSecurityAuditStage(snapshot.Stage, "request"),
 		ConfigVersion: configVersion, CreatedAt: now,
 		ExpiresAt:  now + int64(retentionDays)*24*60*60,
 		Categories: "[]", MatchedScanners: "[]", UnknownCategories: "[]",
@@ -203,6 +204,11 @@ func buildPromptAuditEvent(snapshot PromptAuditSnapshot, configVersion int64, re
 	}
 	event.Decision, event.RiskLevel, event.Action, event.Safety = result.Decision, result.RiskLevel, result.Action, result.Safety
 	event.GuardEndpointId, event.ChunkTotal, event.LatencyMs = result.GuardEndpointId, result.ChunkTotal, result.LatencyMs
+	for _, score := range result.ScannerScores {
+		if score > event.RiskScore {
+			event.RiskScore = score
+		}
+	}
 	if categories, err := common.Marshal(result.Categories); err == nil {
 		event.Categories = string(categories)
 	}

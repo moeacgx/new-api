@@ -245,6 +245,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 
+		service.RecordUpstreamPolicyError(c, newAPIError, "response")
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 		recordChannelRetryState(channelRetryStates, channel.Id, newAPIError, time.Now())
@@ -950,6 +951,7 @@ func RelayTask(c *gin.Context) {
 	}
 
 	if taskErr != nil {
+		service.RecordUpstreamPolicyCode(c, taskErr.Code, "task_response")
 		metricErr = taskErrorToChannelMetricError(taskErr)
 		respondTaskError(c, taskErr)
 	}

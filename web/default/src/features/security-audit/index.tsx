@@ -22,6 +22,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity01Icon,
   Audit01Icon,
+  FilterIcon,
   FloppyDiskIcon,
   RefreshIcon,
   SecurityCheckIcon,
@@ -48,13 +49,39 @@ import {
   getSecurityAuditRuntime,
   updateSecurityAuditConfig,
 } from './api'
+import { SecurityAuditBuiltinPolicyView } from './builtin-policy-view'
 import { SecurityAuditEndpointsView } from './endpoints-view'
 import { SecurityAuditEventsView } from './events-view'
 import { SecurityAuditOverviewView } from './overview-view'
 import { SecurityAuditPolicyView } from './policy-view'
-import type { SecurityAuditConfigDraft } from './types'
+import type {
+  SecurityAuditBuiltinPolicy,
+  SecurityAuditConfigDraft,
+} from './types'
 
-type SecurityAuditTab = 'overview' | 'events' | 'endpoints' | 'policy'
+type SecurityAuditTab =
+  | 'overview'
+  | 'events'
+  | 'builtin-policy'
+  | 'endpoints'
+  | 'policy'
+
+function comparableGuardDraft(draft: SecurityAuditConfigDraft) {
+  return {
+    mode: draft.mode,
+    enabled: draft.enabled,
+    blocking_enabled: draft.blocking_enabled,
+    store_pass_events: draft.store_pass_events,
+    strategy: draft.strategy,
+    worker_count: draft.worker_count,
+    queue_capacity: draft.queue_capacity,
+    retention_days: draft.retention_days,
+    scanners: draft.scanners,
+    all_groups: draft.all_groups,
+    group_ids: draft.group_ids,
+    endpoints: draft.endpoints,
+  }
+}
 
 function validateDraft(
   draft: SecurityAuditConfigDraft,
@@ -149,7 +176,10 @@ export function SecurityAudit() {
     [configQuery.data]
   )
   const dirty = Boolean(
-    draft && baseline && JSON.stringify(draft) !== JSON.stringify(baseline)
+    draft &&
+    baseline &&
+    JSON.stringify(comparableGuardDraft(draft)) !==
+      JSON.stringify(comparableGuardDraft(baseline))
   )
 
   const updateDraft = (patch: Partial<SecurityAuditConfigDraft>) => {
@@ -210,7 +240,25 @@ export function SecurityAudit() {
       configQuery.refetch(),
       runtimeQuery.refetch(),
       groupsQuery.refetch(),
+      queryClient.invalidateQueries({
+        queryKey: ['security-audit', 'builtin-policy'],
+      }),
     ])
+  }
+
+  const handleBuiltinPolicySaved = (policy: SecurityAuditBuiltinPolicy) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            config_version: policy.config_version,
+            updated_at: policy.updated_at,
+            updated_by: policy.updated_by,
+            upstream_policy_enabled: policy.upstream_policy_enabled,
+            sensitive_word_audit_enabled: policy.sensitive_word_audit_enabled,
+          }
+        : current
+    )
   }
 
   const tabs: Array<{
@@ -220,6 +268,11 @@ export function SecurityAudit() {
   }> = [
     { value: 'overview', label: t('Overview'), icon: Activity01Icon },
     { value: 'events', label: t('Audit events'), icon: Audit01Icon },
+    {
+      value: 'builtin-policy',
+      label: t('Built-in policy'),
+      icon: FilterIcon,
+    },
     { value: 'endpoints', label: t('Guard nodes'), icon: ServerStack01Icon },
     { value: 'policy', label: t('Audit policy'), icon: SecurityCheckIcon },
   ]
@@ -250,22 +303,24 @@ export function SecurityAudit() {
             )}
             {t('Refresh')}
           </Button>
-          <Button
-            size='sm'
-            onClick={() => void save()}
-            disabled={!dirty || saving || !draft}
-          >
-            {saving ? (
-              <Spinner data-icon='inline-start' />
-            ) : (
-              <HugeiconsIcon
-                icon={FloppyDiskIcon}
-                strokeWidth={2}
-                data-icon='inline-start'
-              />
-            )}
-            {t('Save changes')}
-          </Button>
+          {tab !== 'builtin-policy' ? (
+            <Button
+              size='sm'
+              onClick={() => void save()}
+              disabled={!dirty || saving || !draft}
+            >
+              {saving ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <HugeiconsIcon
+                  icon={FloppyDiskIcon}
+                  strokeWidth={2}
+                  data-icon='inline-start'
+                />
+              )}
+              {t('Save changes')}
+            </Button>
+          ) : null}
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           {configQuery.isError ? (
@@ -319,6 +374,12 @@ export function SecurityAudit() {
                   <SecurityAuditEventsView
                     endpoints={draft.endpoints}
                     runSensitive={verification.withVerification}
+                  />
+                </TabsContent>
+                <TabsContent value='builtin-policy'>
+                  <SecurityAuditBuiltinPolicyView
+                    runSensitive={verification.withVerification}
+                    onSaved={handleBuiltinPolicySaved}
                   />
                 </TabsContent>
                 <TabsContent value='endpoints'>

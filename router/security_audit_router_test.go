@@ -52,6 +52,8 @@ func TestSecurityAuditAdminRoutesAreRootOnly(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/security-audit/config", "/api/security-audit/config"},
 		{http.MethodPut, "/api/security-audit/config", "/api/security-audit/config"},
+		{http.MethodGet, "/api/security-audit/builtin-policy", "/api/security-audit/builtin-policy"},
+		{http.MethodPut, "/api/security-audit/builtin-policy", "/api/security-audit/builtin-policy"},
 		{http.MethodPost, "/api/security-audit/endpoints/probe", "/api/security-audit/endpoints/probe"},
 		{http.MethodGet, "/api/security-audit/runtime", "/api/security-audit/runtime"},
 		{http.MethodGet, "/api/security-audit/events", "/api/security-audit/events"},

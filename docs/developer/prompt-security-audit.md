@@ -1,30 +1,44 @@
-# 提示词安全审计
+# 安全审计
 
 ## 目标与边界
 
-提示词安全审计是 new-api 的内置 Root 管理能力，用于在请求写入上游前调用
-OpenAI 兼容的 Qwen3Guard 节点进行分类。它不是扩展模块，也不属于系统设置；
-Default 与 Classic 前端均提供独立的“安全审计”一级菜单。
+安全审计是 new-api 的内置 Root 管理能力。它不是扩展模块，也不属于系统设置；
+Default 与 Classic 前端均提供独立的“安全审计”一级菜单。页面统一管理三条相互
+独立的审计链路：本地屏蔽词过滤、上游安全策略事件以及可选的 Qwen3Guard 主动
+提示词分类。Guard 关闭或没有配置节点时，前两条链路仍可工作。
 
-本能力参考 `Wei-Shaw/sub2api` 的 Prompt Audit 行为重新实现。实施基线为
+本能力参考 `Wei-Shaw/sub2api` 的 Content Moderation 与 Prompt Audit 行为重新
+实现。实施基线为
 `59ce11c78000bde5bdd74930b5885753037a5841`（`v0.1.166`），上游许可证为
 LGPL-3.0。new-api 适配采用 GORM、跨数据库 CAS、加密持久化和双 React 前端，
 不引入上游的 PostgreSQL 专用 SQL 或 Vue 组件。
 
-本期只审核客户端可控的文本提示词。图片、音频和其他二进制内容本身不做内容
-识别，但相关文本提示、说明、转写文本和 Realtime 文本帧仍会审核。任务类文本
+主动 Guard 只审核客户端可控的文本提示词。图片、音频和其他二进制内容本身不做
+内容识别，但相关文本提示、说明、转写文本和 Realtime 文本帧仍会审核。任务类文本
 字段包含音频 `ref_text`、Suno 风格 `tags` 和图片水印文字；聊天历史中的兼容
 `reasoning_content` / `reasoning`、Claude thinking 块以及 Gemini 可执行代码上下文
 同样按客户端可控文本处理。
 
+上游安全策略不是本地语义模型。它只在上游已经返回明确的
+`error.code=cyber_policy` 或 `response.error.code=cyber_policy` 后生成事后事件，
+不得把普通 400、关键字包含或模糊错误文案误判为 `cyber_policy`。本地屏蔽词继续
+沿用现有规则、屏蔽词组、渠道范围、请求/响应作用域以及 block/mask 行为；本次只
+迁移管理入口并增加统一事件记录，既有 Option 存储不做破坏性迁移。
+
 ## 安全模型
 
-- 模式为 `off`、`async_audit`、`blocking`，默认 `off`。
+- Guard 模式为 `off`、`async_audit`、`blocking`，默认 `off`；该模式不再充当
+  整个安全审计的总开关。
+- `upstream_policy_enabled` 和 `sensitive_word_audit_enabled` 默认开启，分别控制
+  上游 `cyber_policy` 与屏蔽词命中是否写入统一事件。二者不要求 Guard 节点或
+  审核 API。
 - 管理 API、页面入口、配置、节点探测、原文查看和删除均仅限 Root。
 - 完整审计文本和 Guard 节点令牌使用 AES-256-GCM 版本化密文保存；列表只返回
   脱敏预览、哈希、字符数和技术元数据。
-- 启用功能或保存节点令牌前必须显式配置稳定的 `CRYPTO_SECRET`。密钥丢失或
-  更换后，已有密文无法恢复；轮换前必须先完成数据重加密。
+- 启用 Guard 或保存节点令牌前必须显式配置稳定的 `CRYPTO_SECRET`。密钥丢失或
+  更换后，已有密文无法恢复；轮换前必须先完成数据重加密。本地/上游策略事件在
+  没有密钥时仍记录不可逆哈希、长度、来源、处置和技术元数据，但不保存可还原的
+  正文或正文预览，详情明确返回“正文未保存”。
 - 密钥丢失时管理页仍可加载，并把旧节点令牌标记为 `unreadable`，便于 Root
   关闭审计、清除旧令牌或替换令牌；请求热路径不会因此降级放行。
 - 节点启用状态显式持久化。禁用节点不参与请求门禁；其旧令牌即使不可读，也只
@@ -38,9 +52,9 @@ LGPL-3.0。new-api 适配采用 GORM、跨数据库 CAS、加密持久化和双 
 
 ## 请求流程
 
-HTTP 请求的实际顺序取决于审计是否启用：启用时为认证与可复用正文快照、现有
-敏感词规则预检、Prompt Guard、渠道分配、计费、上游请求；关闭时保持原有的
-“渠道分配后按最终渠道执行敏感词规则”语义。固定渠道令牌继续按该渠道精确判断
+HTTP 请求固定按认证与可复用正文快照、现有敏感词规则预检、可选 Prompt Guard、
+渠道分配、计费、上游请求的顺序执行。内置敏感词规则不依赖 Guard；即使 Guard
+关闭或没有配置节点，也会在渠道分配前独立执行。固定渠道令牌继续按该渠道精确判断
 敏感词规则；动态选渠在分配前无法稳定预测最终渠道，因此只要配置了任一受敏感词
 规则保护的渠道，就按安全优先语义执行一次，并通过请求上下文避免控制器重复过滤。
 这可能使最终落到未配置渠道的请求也提前命中规则，但不会留下先选渠再阻断的副作用
@@ -51,6 +65,18 @@ Chat、Claude Messages、Responses 和 Gemini 请求中的未知、缺失或类�
 按客户端用户输入审核并参与最新输入优先级，避免协议新增角色或伪造角色绕过文本门禁。
 `blocking` 模式下，风险阻断或 Guard 故障发生时不得选择渠道、占用渠道并发、
 预扣费或调用上游。
+
+屏蔽词的 request/response、block/mask 命中均写统一事件，事件来源为
+`sensitive_word`，阶段区分 `request`、`response`、`response_stream`、
+`realtime_request` 和 `realtime_response`；同一请求同一规则与阶段只记录一次，避免
+流式分片重复刷屏。屏蔽词命中仍保持既有 HTTP 状态码和响应格式，不因新增审计记录
+改变转发语义。命中元数据只保存规则 ID（缺失时保存规则名）和动作；提示词正文仍
+遵循统一加密策略，列表不回传命中正文或 Authorization 等敏感字段。
+
+上游 HTTP 错误体、SSE 事件及 Realtime 上游帧在写给客户端前精确检查
+`cyber_policy`。命中时沿用上游原始响应，不新增本地二次阻断；异步写入来源为
+`upstream_policy`、分类为 `cyber_policy`、分数为 `1.0` 的事后事件。该事件只说明
+上游已经拒绝请求，不代表 new-api 在请求前完成了本地语义识别。
 
 分组范围使用请求分配前的真实候选集，而不是只读取用户默认分组。显式单分组
 按稳定分组 ID 判断；显式多分组任一候选命中策略即审核；`auto` 或旧数据无法
@@ -91,7 +117,9 @@ Realtime 对 `session.update`、用户 `conversation.item.create`、
 
 ## 数据与任务契约
 
-配置、节点、任务、事件和队列容量使用专用数据表。JSON 字段统一以 TEXT 保存，
+配置、节点、任务、事件和队列容量使用专用数据表。事件新增 `source`、`stage` 与
+`prompt_available`，来源固定为 `prompt_guard`、`sensitive_word` 或
+`upstream_policy`。JSON 字段统一以 TEXT 保存，
 通过 `common.Marshal`、`common.Unmarshal` 等封装读写。大密文字段在 MySQL
 使用 LONGTEXT，在 SQLite 与 PostgreSQL 使用 TEXT，以容纳 65536 个 Unicode
 字符加密和 Base64 编码后的数据。任务状态为
@@ -130,6 +158,7 @@ Qwen3Guard 结果严格解析唯一的 `Safety:` 和 `Categories:` 行，支持�
 以下接口统一位于 `/api/security-audit`，并使用 `RootAuth`：
 
 - `GET /config`、`PUT /config`
+- `GET /builtin-policy`、`PUT /builtin-policy`
 - `POST /endpoints/probe`
 - `GET /runtime`
 - `GET /events`
@@ -137,6 +166,14 @@ Qwen3Guard 结果严格解析唯一的 `Safety:` 和 `Categories:` 行，支持�
 - `POST /events/batch-delete`
 - `POST /events/delete-preview`
 - `POST /events/delete-by-filter`
+
+内置策略页只通过专用 Root-only 的 `/api/security-audit/builtin-policy` 读取和保存。
+接口底层继续沿用 `CheckSensitiveEnabled`、`CheckSensitiveOnPromptEnabled`、
+`SensitiveRules`、`SensitiveRuleChannelIds` 等既有 Option，不复制配置。`PUT` 必须
+携带 `expected_version`，并在同一数据库事务中通过 CAS 更新内置审计开关和全部
+屏蔽词配置；冲突返回 HTTP 409。旧 `SensitiveWords` 会作为有效规则显示并在首次
+保存时迁移为结构化 `SensitiveRules`，原 Option 保留不清空，避免页面保存隐式删除
+用户数据。系统设置中的旧入口在两套前端移除，防止同一配置出现两个管理入口。
 
 配置保存必须携带 `expected_version`，版本冲突返回 HTTP 409。节点令牌更新只允许
 `token_action=keep|replace|clear`：`replace` 必须携带非空 `token`，`keep` 和
@@ -156,8 +193,9 @@ Qwen3Guard 结果严格解析唯一的 `Safety:` 和 `Categories:` 行，支持�
 - Default：`/security-audit`
 - Classic：`/console/security-audit`
 
-页面包含概览、审计事件、Guard 节点、审计策略四个页内标签。侧栏入口与渠道、
-用户、日志同级，仅 Root 可见；不注册扩展 manifest，不新增系统设置页面。Guard
+页面包含概览、审计事件、内置策略、Guard 节点、审计策略五个页内标签。侧栏入口与
+渠道、用户、日志同级，仅 Root 可见；不注册扩展 manifest，不新增系统设置页面。
+原系统设置“屏蔽词”区块迁移到本页且不保留重复入口。Guard
 节点标签负责节点增删改、优先级、令牌状态和连通性探测；按节点生效的超时与
 Unicode 分片大小统一在审计策略标签编辑，避免与策略参数分散管理。
 
@@ -168,6 +206,9 @@ Unicode 分片大小统一在审计策略标签编辑，避免与策略参数分
 
 - 覆盖三种模式、九类解析、Unicode 分片、节点故障切换、加密、配置 CAS、队列
   容量、任务领取、租约回收、重试、保留期和删除确认令牌。
+- 覆盖屏蔽词 request/response 的 block/mask 事件、流式去重、无
+  `CRYPTO_SECRET` 元数据事件，以及 HTTP/SSE/Realtime 对精确 `cyber_policy`
+  的识别和普通错误不误报。
 - 阻断、不可用和非法响应必须断言渠道、计费及上游调用次数均为零。
 - 验证 SQLite、MySQL、PostgreSQL 查询兼容性以及无 Redis 场景。
 - Default、Classic 均验证 Root 入口、直达权限、空态、错误态和移动端布局。

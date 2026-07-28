@@ -51,11 +51,6 @@ func PromptAudit() gin.HandlerFunc {
 			})
 			return
 		}
-		if mode == service.PromptAuditModeOff {
-			// 审计关闭时保持既有行为：渠道分配后仍由 Relay 按最终渠道执行敏感词规则。
-			c.Next()
-			return
-		}
 		if cfgErr != nil && mode == service.PromptAuditModeBlocking {
 			writePromptAuditRelayError(c, service.PromptAuditDecision{
 				Allow: false, ErrorCode: service.PromptGuardUnavailableCode,
@@ -64,11 +59,19 @@ func PromptAudit() gin.HandlerFunc {
 			})
 			return
 		}
+		sensitiveActive := service.ShouldCheckSensitiveBeforeDistribution(c)
 		// 先保存客户端进入系统时的文本快照。后续敏感词 mask 可以继续修改
 		// 实际转发正文，但 Guard、哈希和加密事件必须基于修改前的原始文本。
 		body, modelName, requestedGroup, bodyErr := promptAuditBodySnapshot(c)
 		if bodyErr != nil {
-			if service.PromptAuditEffectiveMode(cfg) == service.PromptAuditModeAsync {
+			// 未启用前置屏蔽词时，快照失败仍按 Guard 模式处理。只要前置
+			// 屏蔽词已启用，就必须在渠道分配前返回请求错误，不能退回到
+			// 渠道分配后的旧检查路径。
+			if !sensitiveActive && mode == service.PromptAuditModeOff {
+				c.Next()
+				return
+			}
+			if !sensitiveActive && service.PromptAuditEffectiveMode(cfg) == service.PromptAuditModeAsync {
 				service.RecordPromptAuditDropped()
 				c.Next()
 				return
@@ -82,6 +85,28 @@ func PromptAudit() gin.HandlerFunc {
 				Param: "", Code: types.ErrorCodeInvalidRequest,
 			}})
 			return
+		}
+		// 无论 Guard 是否启用，都先保留请求生命周期内的原始文本快照。
+		// 屏蔽词 mask 后的正文和上游 cyber_policy 事件均复用这份快照。
+		protocol, provider := inferPromptAuditProtocol(c.Request.URL.Path)
+		baseSnapshot, baseSnapshotErr := service.ExtractPromptAuditSnapshot(service.PromptAuditRequest{
+			RequestId: c.GetString(common.RequestIdKey),
+			UserId:    common.GetContextKeyInt(c, constant.ContextKeyUserId),
+			Username:  common.GetContextKeyString(c, constant.ContextKeyUserName),
+			UserEmail: common.GetContextKeyString(c, constant.ContextKeyUserEmail),
+			TokenId:   common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+			TokenName: c.GetString("token_name"),
+			GroupId:   common.GetContextKeyInt(c, constant.ContextKeyUserGroupId),
+			GroupName: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			Provider:  provider,
+			Endpoint:  c.Request.URL.Path,
+			Protocol:  protocol,
+			Model:     modelName,
+			Body:      body,
+			Stage:     "request",
+		})
+		if baseSnapshotErr == nil {
+			service.SetSecurityAuditRequestSnapshot(c, baseSnapshot)
 		}
 		filterResult, filterErr := service.ApplySensitiveFilterToRequestBodyBeforeDistribution(
 			c, inferPromptAuditRelayFormat(c.Request.URL.Path),
@@ -103,13 +128,19 @@ func PromptAudit() gin.HandlerFunc {
 			})
 			return
 		}
+		if mode == service.PromptAuditModeOff {
+			// Guard 关闭不影响内置屏蔽词和上游策略事件；屏蔽词已经在
+			// 渠道分配前执行，后续 Relay 会通过上下文标记避免重复过滤。
+			c.Next()
+			return
+		}
 
 		shouldAudit, groupId, groupName := promptAuditResolveGroupScope(c, cfg, requestedGroup)
 		if !shouldAudit {
 			c.Next()
 			return
 		}
-		protocol, provider := inferPromptAuditProtocol(c.Request.URL.Path)
+		protocol, provider = inferPromptAuditProtocol(c.Request.URL.Path)
 		snapshot, snapshotErr := service.ExtractPromptAuditSnapshot(service.PromptAuditRequest{
 			RequestId: c.GetString(common.RequestIdKey),
 			UserId:    common.GetContextKeyInt(c, constant.ContextKeyUserId),

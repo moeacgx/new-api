@@ -40,7 +40,7 @@ import { useTranslation } from 'react-i18next';
 import { timestamp2string } from '../../helpers';
 import { getModeLabel } from './constants';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 const valueOf = (object, lower, upper, fallback = 0) =>
   object?.[lower] ?? object?.[upper] ?? fallback;
@@ -112,7 +112,7 @@ const OverviewTab = ({ config, runtime, loading }) => {
         <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
           <MetricCard
             icon={<ShieldCheck size={20} />}
-            label={t('当前模式')}
+            label={t('Guard 模式')}
             value={getModeLabel(runtime?.effective_mode || config.mode, t)}
             hint={`${t('配置版本')} ${runtime?.config_version || config.config_version}`}
             color='blue'
@@ -145,6 +145,28 @@ const OverviewTab = ({ config, runtime, loading }) => {
             color='orange'
           />
         </div>
+
+        <Card title={t('内置安全策略')} bodyStyle={{ padding: 16 }}>
+          <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+            <Text type='tertiary' size='small'>
+              {t('无需配置 Guard 节点，内置检测也可以独立运行。')}
+            </Text>
+            <div className='flex flex-wrap gap-2'>
+              <Tag
+                color={config.sensitive_word_audit_enabled ? 'green' : 'grey'}
+              >
+                {t('屏蔽词事件')} ·
+                {config.sensitive_word_audit_enabled
+                  ? t('已启用')
+                  : t('已禁用')}
+              </Tag>
+              <Tag color={config.upstream_policy_enabled ? 'green' : 'grey'}>
+                {t('上游安全策略')} ·
+                {config.upstream_policy_enabled ? t('已启用') : t('已禁用')}
+              </Tag>
+            </div>
+          </div>
+        </Card>
 
         <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
           <Card title={t('队列容量')} bodyStyle={{ padding: 16 }}>

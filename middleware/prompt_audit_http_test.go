@@ -222,7 +222,7 @@ func TestSensitiveMaskPreservesOriginalPromptForGuardAndEncryptedAudit(t *testin
 	}
 }
 
-func TestPromptAuditOffKeepsExistingPostDistributionSensitiveRuleSemantics(t *testing.T) {
+func TestPromptAuditOffStillRunsBuiltinSensitiveRulesBeforeDistribution(t *testing.T) {
 	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -258,7 +258,7 @@ func TestPromptAuditOffKeepsExistingPostDistributionSensitiveRuleSemantics(t *te
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/v1/chat/completions", PromptAudit(), func(c *gin.Context) {
-		// 模拟最终选中了不受敏感词规则保护的渠道；关闭审计时应保留原有精确渠道语义。
+		// Guard 关闭时也不应进入渠道分配后的处理函数。
 		common.SetContextKey(c, constant.ContextKeyChannelId, 1000)
 		result, filterErr := service.ApplySensitiveFilterToRequestBody(c, types.RelayFormatOpenAI)
 		require.NoError(t, filterErr)
@@ -272,8 +272,50 @@ func TestPromptAuditOffKeepsExistingPostDistributionSensitiveRuleSemantics(t *te
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	require.Equal(t, http.StatusNoContent, response.Code)
-	require.EqualValues(t, 1, downstreamCalls.Load())
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.Zero(t, downstreamCalls.Load())
+	var event model.PromptAuditEvent
+	require.NoError(t, model.DB.First(&event, "source = ?", service.PromptAuditSourceSensitiveWord).Error)
+	require.Equal(t, "request", event.Stage)
+}
+
+func TestPromptAuditOffRejectsUnreadableBodyBeforeSensitiveDistribution(t *testing.T) {
+	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer guard.Close()
+	setupPromptAuditRealtimeTestDB(t, guard.URL)
+	cfg, endpoints, err := model.LoadPromptAuditConfig()
+	require.NoError(t, err)
+	cfg.Enabled = false
+	cfg.BlockingEnabled = false
+	require.NoError(t, model.SavePromptAuditConfig(cfg.ConfigVersion, cfg, endpoints))
+	service.InvalidatePromptAuditConfig()
+
+	oldEnabled, oldPromptEnabled := setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled
+	oldChannelIds := setting.SensitiveRuleChannelIds
+	setting.CheckSensitiveEnabled = true
+	setting.CheckSensitiveOnPromptEnabled = true
+	setting.SensitiveRuleChannelIds = []int{999}
+	t.Cleanup(func() {
+		setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled = oldEnabled, oldPromptEnabled
+		setting.SensitiveRuleChannelIds = oldChannelIds
+	})
+
+	var downstreamCalls atomic.Int64
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/v1/chat/completions", PromptAudit(), func(c *gin.Context) {
+		downstreamCalls.Add(1)
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.Zero(t, downstreamCalls.Load())
 }
 
 func TestPromptAuditAsyncExtractionFailureDoesNotAffectRequest(t *testing.T) {

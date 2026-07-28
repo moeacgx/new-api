@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -108,6 +110,143 @@ func TestPromptAuditRealtimeBlocksBeforeNextMiddleware(t *testing.T) {
 			require.Zero(t, nextCalls.Load())
 		})
 	}
+}
+
+func TestPromptAuditRealtimeGuardOffStillRunsSensitiveRuleBeforeDistribution(t *testing.T) {
+	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer guard.Close()
+	setupPromptAuditRealtimeTestDB(t, guard.URL)
+	cfg, endpoints, err := model.LoadPromptAuditConfig()
+	require.NoError(t, err)
+	cfg.Enabled = false
+	cfg.BlockingEnabled = false
+	require.NoError(t, model.SavePromptAuditConfig(cfg.ConfigVersion, cfg, endpoints))
+	service.InvalidatePromptAuditConfig()
+
+	oldEnabled, oldPromptEnabled := setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled
+	oldRules, oldConfigured := setting.SensitiveRules, setting.SensitiveRulesConfigured
+	oldChannelIDs := setting.SensitiveRuleChannelIds
+	setting.CheckSensitiveEnabled = true
+	setting.CheckSensitiveOnPromptEnabled = true
+	setting.SensitiveRulesConfigured = true
+	setting.SensitiveRules = []setting.SensitiveRule{{
+		ID: "realtime-sensitive", Name: "Realtime Sensitive", Enabled: true,
+		Action: setting.SensitiveRuleActionBlock, Scope: setting.SensitiveRuleScopeRequest,
+		Keywords: []string{"realtime-secret"},
+	}}
+	setting.SensitiveRuleChannelIds = []int{99}
+	t.Cleanup(func() {
+		setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled = oldEnabled, oldPromptEnabled
+		setting.SensitiveRules, setting.SensitiveRulesConfigured = oldRules, oldConfigured
+		setting.SensitiveRuleChannelIds = oldChannelIDs
+	})
+
+	var nextCalls atomic.Int64
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/v1/realtime",
+		func(c *gin.Context) {
+			common.SetContextKey(c, constant.ContextKeyUserId, 10)
+			common.SetContextKey(c, constant.ContextKeyUserGroupId, 1)
+			common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+			common.SetContextKey(c, constant.ContextKeyTokenId, 20)
+			c.Next()
+		},
+		PromptAuditRealtime(),
+		func(c *gin.Context) { nextCalls.Add(1) },
+	)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	dialer := websocket.Dialer{Subprotocols: []string{"realtime"}}
+	conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/realtime", nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.WriteJSON(map[string]interface{}{
+		"type": "session.update", "session": map[string]string{"instructions": "realtime-secret"},
+	}))
+	_, payload, readErr := conn.ReadMessage()
+	require.NoError(t, readErr)
+	require.Contains(t, string(payload), string(types.ErrorCodeSensitiveWordsDetected))
+	_, _, readErr = conn.ReadMessage()
+	var closeErr *websocket.CloseError
+	require.ErrorAs(t, readErr, &closeErr)
+	require.Equal(t, 4403, closeErr.Code)
+	require.Zero(t, nextCalls.Load())
+
+	var event model.PromptAuditEvent
+	require.NoError(t, model.DB.First(&event, "source = ?", service.PromptAuditSourceSensitiveWord).Error)
+	require.Equal(t, "realtime_request", event.Stage)
+}
+
+func TestPromptAuditRealtimeMaskForwardsRewrittenFrameButGuardsOriginal(t *testing.T) {
+	guardBodies := make(chan string, 1)
+	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		guardBodies <- string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"}}]}`)
+	}))
+	defer guard.Close()
+	setupPromptAuditRealtimeTestDB(t, guard.URL)
+
+	oldEnabled, oldPromptEnabled := setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled
+	oldRules, oldConfigured := setting.SensitiveRules, setting.SensitiveRulesConfigured
+	oldChannelIDs, oldWords := setting.SensitiveRuleChannelIds, setting.SensitiveWords
+	setting.CheckSensitiveEnabled = true
+	setting.CheckSensitiveOnPromptEnabled = true
+	setting.SensitiveRulesConfigured = true
+	setting.SensitiveRules = []setting.SensitiveRule{{
+		ID: "realtime-mask", Name: "Realtime Mask", Enabled: true,
+		Action: setting.SensitiveRuleActionMask, Scope: setting.SensitiveRuleScopeRequest,
+		Keywords: []string{"original-secret"}, Replacement: "[masked]",
+	}}
+	setting.SensitiveRuleChannelIds = []int{99}
+	setting.SensitiveWords = nil
+	t.Cleanup(func() {
+		setting.CheckSensitiveEnabled, setting.CheckSensitiveOnPromptEnabled = oldEnabled, oldPromptEnabled
+		setting.SensitiveRules, setting.SensitiveRulesConfigured = oldRules, oldConfigured
+		setting.SensitiveRuleChannelIds, setting.SensitiveWords = oldChannelIDs, oldWords
+	})
+
+	forwardedFrames := make(chan string, 1)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/v1/realtime",
+		func(c *gin.Context) {
+			common.SetContextKey(c, constant.ContextKeyUserId, 10)
+			common.SetContextKey(c, constant.ContextKeyUserGroupId, 1)
+			common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+			common.SetContextKey(c, constant.ContextKeyTokenId, 20)
+			c.Next()
+		},
+		PromptAuditRealtime(),
+		func(c *gin.Context) {
+			frames, _ := common.GetContextKeyType[service.PromptAuditRealtimeFrames](c, constant.ContextKeyPromptAuditRealtimeBufferedFrames)
+			forwardedFrames <- string(frames[0].Payload)
+			conn, _ := common.GetContextKeyType[*websocket.Conn](c, constant.ContextKeyPromptAuditRealtimeClientWs)
+			_ = conn.WriteJSON(map[string]string{"type": "audit.ack"})
+		},
+	)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	dialer := websocket.Dialer{Subprotocols: []string{"realtime"}}
+	conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/realtime", nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.WriteJSON(map[string]interface{}{
+		"type": "session.update", "session": map[string]string{"instructions": "original-secret"},
+	}))
+	_, _, err = conn.ReadMessage()
+	require.NoError(t, err)
+
+	require.Contains(t, <-guardBodies, "original-secret")
+	forwarded := <-forwardedFrames
+	require.Contains(t, forwarded, "[masked]")
+	require.NotContains(t, forwarded, "original-secret")
 }
 
 func TestPromptAuditRealtimeBuffersRawBinaryBeforeRiskJSON(t *testing.T) {

@@ -80,7 +80,9 @@ const PolicyTab = ({ draft, groups, groupsLoading, onChange }) => {
             type={draft.mode === 'blocking' ? 'warning' : 'info'}
             description={
               draft.mode === 'off'
-                ? t('关闭时不执行 Guard 检查，也不会创建新的审计事件。')
+                ? t(
+                    '关闭时不执行 Guard 检查；内置屏蔽词和上游安全策略仍可独立运行并记录事件。',
+                  )
                 : draft.mode === 'async_audit'
                   ? t('异步审计不影响主请求，审计任务由数据库队列处理。')
                   : t(

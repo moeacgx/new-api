@@ -86,6 +86,28 @@ export const draftToUpdatePayload = (draft) => ({
 export const getSecurityAuditConfig = async () =>
   unwrap(await API.get(`${API_ROOT}/config`, requestConfig));
 
+export const getSecurityAuditBuiltinPolicy = async () =>
+  unwrap(await API.get(`${API_ROOT}/builtin-policy`, requestConfig));
+
+export const updateSecurityAuditBuiltinPolicy = async (policy) =>
+  unwrap(
+    await API.put(
+      `${API_ROOT}/builtin-policy`,
+      {
+        expected_version: policy.config_version,
+        upstream_policy_enabled: policy.upstream_policy_enabled === true,
+        sensitive_word_audit_enabled:
+          policy.sensitive_word_audit_enabled === true,
+        check_sensitive_enabled: policy.check_sensitive_enabled === true,
+        check_sensitive_on_prompt_enabled:
+          policy.check_sensitive_on_prompt_enabled === true,
+        sensitive_rules: policy.sensitive_rules || '{"rules":[]}',
+        sensitive_rule_channel_ids: policy.sensitive_rule_channel_ids || '[]',
+      },
+      { skipErrorHandler: true },
+    ),
+  );
+
 export const updateSecurityAuditConfig = async (draft) =>
   unwrap(
     await API.put(`${API_ROOT}/config`, draftToUpdatePayload(draft), {

@@ -61,9 +61,11 @@ type PromptAuditEndpoint struct {
 }
 
 type PromptAuditConfig struct {
-	Enabled         bool `json:"enabled"`
-	BlockingEnabled bool `json:"blocking_enabled"`
-	StorePassEvents bool `json:"store_pass_events"`
+	Enabled                   bool `json:"enabled"`
+	BlockingEnabled           bool `json:"blocking_enabled"`
+	StorePassEvents           bool `json:"store_pass_events"`
+	UpstreamPolicyEnabled     bool `json:"upstream_policy_enabled"`
+	SensitiveWordAuditEnabled bool `json:"sensitive_word_audit_enabled"`
 	// Mode 是面向管理 API 的稳定别名；EffectiveMode 保留运行态兼容字段。
 	Mode          string                `json:"mode"`
 	EffectiveMode string                `json:"effective_mode"`
@@ -95,19 +97,21 @@ type PromptAuditUpdateEndpoint struct {
 }
 
 type PromptAuditUpdateRequest struct {
-	ExpectedConfigVersion int64                       `json:"expected_version"`
-	Mode                  string                      `json:"mode,omitempty"`
-	Enabled               bool                        `json:"enabled"`
-	BlockingEnabled       bool                        `json:"blocking_enabled"`
-	StorePassEvents       bool                        `json:"store_pass_events"`
-	Strategy              string                      `json:"strategy"`
-	WorkerCount           int                         `json:"worker_count"`
-	QueueCapacity         int                         `json:"queue_capacity"`
-	RetentionDays         int                         `json:"retention_days"`
-	Scanners              []string                    `json:"scanners"`
-	AllGroups             bool                        `json:"all_groups"`
-	GroupIds              []int                       `json:"group_ids"`
-	Endpoints             []PromptAuditUpdateEndpoint `json:"endpoints"`
+	ExpectedConfigVersion     int64                       `json:"expected_version"`
+	Mode                      string                      `json:"mode,omitempty"`
+	Enabled                   bool                        `json:"enabled"`
+	BlockingEnabled           bool                        `json:"blocking_enabled"`
+	StorePassEvents           bool                        `json:"store_pass_events"`
+	UpstreamPolicyEnabled     *bool                       `json:"upstream_policy_enabled,omitempty"`
+	SensitiveWordAuditEnabled *bool                       `json:"sensitive_word_audit_enabled,omitempty"`
+	Strategy                  string                      `json:"strategy"`
+	WorkerCount               int                         `json:"worker_count"`
+	QueueCapacity             int                         `json:"queue_capacity"`
+	RetentionDays             int                         `json:"retention_days"`
+	Scanners                  []string                    `json:"scanners"`
+	AllGroups                 bool                        `json:"all_groups"`
+	GroupIds                  []int                       `json:"group_ids"`
+	Endpoints                 []PromptAuditUpdateEndpoint `json:"endpoints"`
 }
 
 type PromptAuditSnapshot struct {
@@ -368,6 +372,7 @@ func promptAuditConfigFromModels(row *model.PromptAuditConfig, endpointRows []mo
 	}
 	cfg := &PromptAuditConfig{
 		Enabled: row.Enabled, BlockingEnabled: row.BlockingEnabled, StorePassEvents: row.StorePassEvents,
+		UpstreamPolicyEnabled: row.UpstreamPolicyEnabled, SensitiveWordAuditEnabled: row.SensitiveWordAuditEnabled,
 		Strategy: row.Strategy, WorkerCount: row.WorkerCount, QueueCapacity: row.QueueCapacity,
 		RetentionDays: row.RetentionDays, Scanners: scanners, AllGroups: row.AllGroups,
 		GroupIds: groupIds, Endpoints: endpoints, ConfigVersion: row.ConfigVersion,

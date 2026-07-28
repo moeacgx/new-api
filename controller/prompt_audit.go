@@ -16,6 +16,8 @@ import (
 )
 
 type promptAuditEventFilterRequest struct {
+	Source     string `json:"source"`
+	Stage      string `json:"stage"`
 	Decision   string `json:"decision"`
 	RiskLevel  string `json:"risk_level"`
 	Endpoint   string `json:"endpoint"`
@@ -31,6 +33,7 @@ type promptAuditEventFilterRequest struct {
 
 func (req promptAuditEventFilterRequest) toModel() model.PromptAuditEventFilter {
 	return model.PromptAuditEventFilter{
+		Source: strings.TrimSpace(req.Source), Stage: strings.TrimSpace(req.Stage),
 		Decision: strings.TrimSpace(req.Decision), RiskLevel: strings.TrimSpace(req.RiskLevel),
 		Endpoint: strings.TrimSpace(req.Endpoint), RequestId: strings.TrimSpace(req.RequestId),
 		PromptHash: strings.TrimSpace(req.PromptHash), Keyword: strings.TrimSpace(req.Keyword),
@@ -97,6 +100,40 @@ func UpdatePromptAuditConfig(c *gin.Context) {
 		"endpoint_count": len(cfg.Endpoints),
 	})
 	common.ApiSuccess(c, cfg)
+}
+
+func GetSecurityAuditBuiltinPolicy(c *gin.Context) {
+	policy, err := service.GetSecurityAuditBuiltinPolicy()
+	if err != nil {
+		writePromptAuditAdminError(c, http.StatusInternalServerError, "security_audit_builtin_policy_load_failed", "内置安全策略加载失败")
+		return
+	}
+	common.ApiSuccess(c, policy)
+}
+
+func UpdateSecurityAuditBuiltinPolicy(c *gin.Context) {
+	var req service.SecurityAuditBuiltinPolicyUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		writePromptAuditAdminError(c, http.StatusBadRequest, "security_audit_builtin_policy_invalid_request", "内置安全策略参数无效")
+		return
+	}
+	policy, err := service.SaveSecurityAuditBuiltinPolicy(req, c.GetInt("id"))
+	if err != nil {
+		if errors.Is(err, model.ErrPromptAuditConfigConflict) {
+			writePromptAuditAdminError(c, http.StatusConflict, service.PromptAuditConfigConflictCode, "安全审计配置已被其他管理员更新，请刷新后重试")
+			return
+		}
+		writePromptAuditAdminError(c, http.StatusBadRequest, "security_audit_builtin_policy_invalid", err.Error())
+		return
+	}
+	recordPromptAuditAdminLog(c, "更新了内置安全策略", map[string]interface{}{
+		"config_version":                    policy.ConfigVersion,
+		"upstream_policy_enabled":           policy.UpstreamPolicyEnabled,
+		"sensitive_word_audit_enabled":      policy.SensitiveWordAuditEnabled,
+		"check_sensitive_enabled":           policy.CheckSensitiveEnabled,
+		"check_sensitive_on_prompt_enabled": policy.CheckSensitiveOnPromptEnabled,
+	})
+	common.ApiSuccess(c, policy)
 }
 
 func ProbePromptAuditEndpoint(c *gin.Context) {
@@ -308,6 +345,8 @@ func ListPromptAuditEvents(c *gin.Context) {
 }
 
 func GetPromptAuditEvent(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 	id, ok := promptAuditEventId(c)
 	if !ok {
 		return
@@ -419,6 +458,7 @@ func promptAuditFilterFromQuery(c *gin.Context) (model.PromptAuditEventFilter, e
 		return model.PromptAuditEventFilter{}, errors.New("开始时间不能晚于结束时间")
 	}
 	return model.PromptAuditEventFilter{
+		Source: c.Query("source"), Stage: c.Query("stage"),
 		Decision: c.Query("decision"), RiskLevel: c.Query("risk_level"), Endpoint: c.Query("endpoint"),
 		RequestId: c.Query("request_id"), PromptHash: c.Query("prompt_hash"), Keyword: c.Query("keyword"),
 		UserId: userId, TokenId: tokenId, GroupId: groupId, StartAt: startAt, EndAt: endAt,

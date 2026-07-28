@@ -34,21 +34,23 @@ const (
 
 // PromptAuditConfig 保存安全审计的单例策略。复杂数组使用 TEXT JSON，保证三库兼容。
 type PromptAuditConfig struct {
-	Id              int    `json:"id" gorm:"primaryKey"`
-	ConfigVersion   int64  `json:"config_version" gorm:"not null;default:1"`
-	Enabled         bool   `json:"enabled" gorm:"not null;default:false"`
-	BlockingEnabled bool   `json:"blocking_enabled" gorm:"not null;default:false"`
-	StorePassEvents bool   `json:"store_pass_events" gorm:"not null;default:false"`
-	Strategy        string `json:"strategy" gorm:"type:varchar(32);not null;default:'priority'"`
-	WorkerCount     int    `json:"worker_count" gorm:"not null;default:4"`
-	QueueCapacity   int    `json:"queue_capacity" gorm:"not null;default:32768"`
-	RetentionDays   int    `json:"retention_days" gorm:"not null;default:30"`
-	Scanners        string `json:"-" gorm:"type:text;not null"`
-	AllGroups       bool   `json:"all_groups" gorm:"not null;default:true"`
-	GroupIds        string `json:"-" gorm:"type:text;not null"`
-	UpdatedAt       int64  `json:"updated_at" gorm:"not null;default:0"`
-	UpdatedBy       int    `json:"updated_by" gorm:"not null;default:0"`
-	ChangeSummary   string `json:"change_summary" gorm:"type:text;not null"`
+	Id                        int    `json:"id" gorm:"primaryKey"`
+	ConfigVersion             int64  `json:"config_version" gorm:"not null;default:1"`
+	Enabled                   bool   `json:"enabled" gorm:"not null;default:false"`
+	BlockingEnabled           bool   `json:"blocking_enabled" gorm:"not null;default:false"`
+	StorePassEvents           bool   `json:"store_pass_events" gorm:"not null;default:false"`
+	UpstreamPolicyEnabled     bool   `json:"upstream_policy_enabled" gorm:"not null;default:true"`
+	SensitiveWordAuditEnabled bool   `json:"sensitive_word_audit_enabled" gorm:"not null;default:true"`
+	Strategy                  string `json:"strategy" gorm:"type:varchar(32);not null;default:'priority'"`
+	WorkerCount               int    `json:"worker_count" gorm:"not null;default:4"`
+	QueueCapacity             int    `json:"queue_capacity" gorm:"not null;default:32768"`
+	RetentionDays             int    `json:"retention_days" gorm:"not null;default:30"`
+	Scanners                  string `json:"-" gorm:"type:text;not null"`
+	AllGroups                 bool   `json:"all_groups" gorm:"not null;default:true"`
+	GroupIds                  string `json:"-" gorm:"type:text;not null"`
+	UpdatedAt                 int64  `json:"updated_at" gorm:"not null;default:0"`
+	UpdatedBy                 int    `json:"updated_by" gorm:"not null;default:0"`
+	ChangeSummary             string `json:"change_summary" gorm:"type:text;not null"`
 }
 
 func (PromptAuditConfig) TableName() string { return "prompt_audit_configs" }
@@ -114,9 +116,13 @@ type PromptAuditEvent struct {
 	PromptCipherKind  string               `json:"-" gorm:"type:varchar(32);not null;default:'prompt_v1'"`
 	PromptLength      int                  `json:"prompt_length" gorm:"not null"`
 	PromptTruncated   bool                 `json:"prompt_truncated" gorm:"not null;default:false"`
+	PromptAvailable   bool                 `json:"prompt_available" gorm:"not null;default:true"`
 	MessageCount      int                  `json:"message_count" gorm:"not null;default:0"`
+	Source            string               `json:"source" gorm:"type:varchar(32);not null;default:'prompt_guard';index"`
+	Stage             string               `json:"stage" gorm:"type:varchar(32);not null;default:'request';index"`
 	Decision          string               `json:"decision" gorm:"type:varchar(24);not null;index"`
 	RiskLevel         string               `json:"risk_level" gorm:"type:varchar(24);not null;index"`
+	RiskScore         float64              `json:"risk_score" gorm:"not null;default:0"`
 	Action            string               `json:"action" gorm:"type:varchar(24);not null"`
 	Safety            string               `json:"safety" gorm:"type:varchar(32);not null;index"`
 	Categories        string               `json:"-" gorm:"type:text;not null"`
@@ -177,6 +183,7 @@ func defaultPromptAuditConfig() PromptAuditConfig {
 		Id: PromptAuditConfigID, ConfigVersion: 1, Strategy: "priority", WorkerCount: 4,
 		QueueCapacity: 32768, RetentionDays: 30, Scanners: string(scanners),
 		AllGroups: true, GroupIds: string(groups), ChangeSummary: "{}",
+		UpstreamPolicyEnabled: true, SensitiveWordAuditEnabled: true,
 	}
 }
 
@@ -218,7 +225,9 @@ func SavePromptAuditConfig(expectedVersion int64, cfg *PromptAuditConfig, endpoi
 		updates := map[string]interface{}{
 			"config_version": cfg.ConfigVersion, "enabled": cfg.Enabled,
 			"blocking_enabled": cfg.BlockingEnabled, "store_pass_events": cfg.StorePassEvents,
-			"strategy": cfg.Strategy, "worker_count": cfg.WorkerCount,
+			"upstream_policy_enabled":      cfg.UpstreamPolicyEnabled,
+			"sensitive_word_audit_enabled": cfg.SensitiveWordAuditEnabled,
+			"strategy":                     cfg.Strategy, "worker_count": cfg.WorkerCount,
 			"queue_capacity": cfg.QueueCapacity, "retention_days": cfg.RetentionDays,
 			"scanners": cfg.Scanners, "all_groups": cfg.AllGroups, "group_ids": cfg.GroupIds,
 			"updated_at": now, "updated_by": cfg.UpdatedBy, "change_summary": cfg.ChangeSummary,
@@ -430,7 +439,20 @@ func CreatePromptAuditEvent(event *PromptAuditEvent) error {
 	if event.CreatedAt == 0 {
 		event.CreatedAt = time.Now().Unix()
 	}
-	return DB.Create(event).Error
+	if event.PromptAvailable {
+		return DB.Create(event).Error
+	}
+	// GORM 对带 default 标签的 bool 零值会省略写入。新来源在无
+	// CRYPTO_SECRET 时必须明确保存 false，并把插入与修正放进同一事务，
+	// 避免进程中断后留下“可查看但没有密文”的半状态事件。
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(event).Error; err != nil {
+			return err
+		}
+		event.PromptAvailable = false
+		return tx.Model(&PromptAuditEvent{}).Where("id = ?", event.Id).
+			UpdateColumn("prompt_available", false).Error
+	})
 }
 
 // UpdatePromptAuditEvent 只更新已经创建的同步待审事件。
@@ -448,8 +470,10 @@ func UpdatePromptAuditEvent(event *PromptAuditEvent) error {
 		"prompt_hash": event.PromptHash, "redacted_preview": event.RedactedPreview,
 		"prompt_ciphertext": event.PromptCiphertext, "prompt_cipher_kind": event.PromptCipherKind,
 		"prompt_length":    event.PromptLength,
-		"prompt_truncated": event.PromptTruncated, "message_count": event.MessageCount,
-		"decision": event.Decision, "risk_level": event.RiskLevel, "action": event.Action, "safety": event.Safety,
+		"prompt_truncated": event.PromptTruncated, "prompt_available": event.PromptAvailable,
+		"message_count": event.MessageCount, "source": event.Source, "stage": event.Stage,
+		"decision": event.Decision, "risk_level": event.RiskLevel, "risk_score": event.RiskScore,
+		"action": event.Action, "safety": event.Safety,
 		"categories": event.Categories, "matched_scanners": event.MatchedScanners,
 		"unknown_categories": event.UnknownCategories,
 		"guard_endpoint_id":  event.GuardEndpointId, "config_version": event.ConfigVersion,
@@ -566,7 +590,8 @@ func buildExpiredPromptAuditJobEvent(job PromptAuditJob, now int64, retentionDay
 		PromptHash: snapshot.PromptHash, RedactedPreview: snapshot.RedactedPreview,
 		PromptCiphertext: job.PromptCiphertext, PromptCipherKind: PromptAuditCipherKindJobPayload,
 		PromptLength:    snapshot.PromptLength,
-		PromptTruncated: snapshot.PromptTruncated, MessageCount: snapshot.MessageCount,
+		PromptTruncated: snapshot.PromptTruncated, PromptAvailable: job.PromptCiphertext != "",
+		MessageCount: snapshot.MessageCount, Source: "prompt_guard", Stage: "async_worker",
 		Decision: "error", RiskLevel: "unknown", Action: "Error", Safety: "Unknown",
 		Categories: "[]", MatchedScanners: "[]", UnknownCategories: "[]",
 		ConfigVersion: job.ConfigVersion,
@@ -576,12 +601,18 @@ func buildExpiredPromptAuditJobEvent(job PromptAuditJob, now int64, retentionDay
 }
 
 type PromptAuditEventFilter struct {
-	Decision, RiskLevel, Endpoint, RequestId, PromptHash, Keyword string
-	UserId, TokenId, GroupId                                      int
-	StartAt, EndAt, SnapshotMaxId                                 int64
+	Source, Stage, Decision, RiskLevel, Endpoint, RequestId, PromptHash, Keyword string
+	UserId, TokenId, GroupId                                                     int
+	StartAt, EndAt, SnapshotMaxId                                                int64
 }
 
 func applyPromptAuditEventFilter(query *gorm.DB, filter PromptAuditEventFilter) *gorm.DB {
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+	if filter.Stage != "" {
+		query = query.Where("stage = ?", filter.Stage)
+	}
 	if filter.Decision != "" {
 		query = query.Where("decision = ?", filter.Decision)
 	}
@@ -641,7 +672,8 @@ func ListPromptAuditEvents(filter PromptAuditEventFilter, page, pageSize int) ([
 	var events []PromptAuditEvent
 	if err := query.Select("id", "job_id", "request_id", "user_id", "username", "user_email", "token_id", "token_name",
 		"group_id", "group_name", "provider", "endpoint", "protocol", "model", "prompt_hash", "redacted_preview",
-		"prompt_length", "prompt_truncated", "message_count", "decision", "risk_level", "action", "safety",
+		"prompt_length", "prompt_truncated", "prompt_available", "message_count", "source", "stage",
+		"decision", "risk_level", "risk_score", "action", "safety",
 		"categories", "matched_scanners", "unknown_categories", "guard_endpoint_id", "config_version", "chunk_total", "latency_ms",
 		"error_code", "error_message", "created_at", "expires_at").
 		Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&events).Error; err != nil {
@@ -761,7 +793,7 @@ func DeletePromptAuditEventsByFilter(filter PromptAuditEventFilter) (int64, int6
 	if filter.UserId < 0 || filter.TokenId < 0 || filter.GroupId < 0 || filter.StartAt < 0 || filter.EndAt < 0 {
 		return 0, 0, errors.New("安全审计删除筛选中的 ID 和时间不能为负数")
 	}
-	if filter.Decision == "" && filter.RiskLevel == "" && filter.Endpoint == "" &&
+	if filter.Source == "" && filter.Stage == "" && filter.Decision == "" && filter.RiskLevel == "" && filter.Endpoint == "" &&
 		filter.RequestId == "" && filter.PromptHash == "" && filter.Keyword == "" &&
 		filter.UserId == 0 && filter.TokenId == 0 && filter.GroupId == 0 &&
 		filter.StartAt == 0 && filter.EndAt == 0 {

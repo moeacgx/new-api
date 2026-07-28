@@ -107,7 +107,13 @@ func ApplySensitiveFilterToRequestBodyBeforeDistribution(c *gin.Context, relayFo
 
 func applySensitiveFilterToRequestBody(c *gin.Context, relayFormat types.RelayFormat, beforeDistribution bool) (*SensitiveFilterResult, error) {
 	result := &SensitiveFilterResult{}
-	if c == nil || c.Request == nil || !setting.ShouldCheckPromptSensitive() {
+	if c == nil || c.Request == nil {
+		return result, nil
+	}
+	// 即使 Guard 与屏蔽词均未启用，也保留请求生命周期内的文本快照，
+	// 供上游 cyber_policy 事件关联。读取失败不改变原请求转发语义。
+	captureSecurityAuditRequestBody(c, relayFormat)
+	if !setting.ShouldCheckPromptSensitive() {
 		return result, nil
 	}
 	shouldRun := shouldRunSensitiveFilter(c)
@@ -151,6 +157,7 @@ func applySensitiveFilterToRequestBody(c *gin.Context, relayFormat types.RelayFo
 	if len(blockScan.matches) > 0 {
 		result.Blocked = true
 		result.Matches = blockScan.matches
+		RecordSensitiveWordAuditEvent(c, "request", result.Matches, nil)
 		if prechecked {
 			c.Set(sensitiveRequestPrecheckedContextKey, true)
 		}
@@ -184,6 +191,7 @@ func applySensitiveFilterToRequestBody(c *gin.Context, relayFormat types.RelayFo
 
 	result.Mutated = true
 	result.Matches = maskScan.matches
+	RecordSensitiveWordAuditEvent(c, "request", result.Matches, nil)
 	if prechecked {
 		c.Set(sensitiveRequestPrecheckedContextKey, true)
 	}
@@ -210,6 +218,10 @@ func shouldRunSensitiveFilterBeforeDistribution(c *gin.Context) bool {
 	return len(setting.NormalizeSensitiveRuleChannelIds(setting.SensitiveRuleChannelIds)) > 0
 }
 
+func ShouldCheckSensitiveBeforeDistribution(c *gin.Context) bool {
+	return setting.ShouldCheckPromptSensitive() && shouldRunSensitiveFilterBeforeDistribution(c)
+}
+
 func ApplySensitiveFilterToResponseBody(c *gin.Context, contentType string, body []byte) (*SensitiveFilterResult, []byte, error) {
 	result := &SensitiveFilterResult{}
 	if !shouldRunSensitiveFilter(c) {
@@ -230,12 +242,14 @@ func ApplySensitiveFilterToResponseBody(c *gin.Context, contentType string, body
 	if err := common.Unmarshal(body, &payload); err != nil {
 		return nil, nil, err
 	}
+	auditSnapshot := buildSecurityAuditResponseSnapshot(c, payload, "response")
 
 	blockScan := &responseTextProcessor{filter: filter, mode: setting.SensitiveRuleActionBlock}
 	processResponseTextFields(payload, blockScan)
 	if len(blockScan.matches) > 0 {
 		result.Blocked = true
 		result.Matches = blockScan.matches
+		RecordSensitiveWordAuditEvent(c, "response", result.Matches, auditSnapshot)
 		return result, body, nil
 	}
 
@@ -251,6 +265,7 @@ func ApplySensitiveFilterToResponseBody(c *gin.Context, contentType string, body
 	}
 	result.Mutated = true
 	result.Matches = maskScan.matches
+	RecordSensitiveWordAuditEvent(c, "response", result.Matches, auditSnapshot)
 	return result, rewritten, nil
 }
 
@@ -269,17 +284,20 @@ func ApplySensitiveFilterToStreamData(c *gin.Context, data string) (*SensitiveFi
 	if err := common.UnmarshalJsonStr(trimmed, &payload); err != nil {
 		return nil, "", err
 	}
+	auditSnapshot := buildSecurityAuditResponseSnapshot(c, payload, "response_stream")
 
 	blockScan := &responseTextProcessor{filter: filter, mode: setting.SensitiveRuleActionBlock}
 	processResponseTextFields(payload, blockScan)
 	if len(blockScan.matches) > 0 {
 		result.Blocked = true
 		result.Matches = blockScan.matches
+		RecordSensitiveWordAuditEvent(c, "response_stream", result.Matches, auditSnapshot)
 		return result, data, nil
 	}
 	if matches := filter.streamBlockMatches(c, payload); len(matches) > 0 {
 		result.Blocked = true
 		result.Matches = matches
+		RecordSensitiveWordAuditEvent(c, "response_stream", result.Matches, auditSnapshot)
 		return result, data, nil
 	}
 
@@ -295,7 +313,179 @@ func ApplySensitiveFilterToStreamData(c *gin.Context, data string) (*SensitiveFi
 	}
 	result.Mutated = true
 	result.Matches = maskScan.matches
+	RecordSensitiveWordAuditEvent(c, "response_stream", result.Matches, auditSnapshot)
 	return result, string(rewritten), nil
+}
+
+func captureSecurityAuditRequestBody(c *gin.Context, relayFormat types.RelayFormat) {
+	if c == nil || c.Request == nil || !isJSONContentType(c.Request.Header.Get("Content-Type")) {
+		return
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return
+	}
+	body, err := storage.Bytes()
+	if err != nil || len(bytes.TrimSpace(body)) == 0 {
+		return
+	}
+	_, _ = CaptureSecurityAuditRequestSnapshot(c, relayFormat, body)
+}
+
+// ApplySensitiveFilterToRealtimeRequestFrame 在写入上游前处理 Realtime 文本控制帧。
+// 音频二进制帧由调用方直接透传，不进入本函数。
+func ApplySensitiveFilterToRealtimeRequestFrame(c *gin.Context, body []byte) (*SensitiveFilterResult, []byte, error) {
+	return applySensitiveFilterToRealtimeRequestFrame(c, body, false)
+}
+
+// ApplySensitiveFilterToRealtimeRequestFrameBeforeDistribution 用于首个控制帧
+// 的渠道分配前门禁，动态选渠沿用 HTTP 的“任一受保护渠道即先检查”语义。
+func ApplySensitiveFilterToRealtimeRequestFrameBeforeDistribution(c *gin.Context, body []byte) (*SensitiveFilterResult, []byte, error) {
+	return applySensitiveFilterToRealtimeRequestFrame(c, body, true)
+}
+
+func applySensitiveFilterToRealtimeRequestFrame(c *gin.Context, body []byte, beforeDistribution bool) (*SensitiveFilterResult, []byte, error) {
+	result := &SensitiveFilterResult{}
+	if c == nil || len(bytes.TrimSpace(body)) == 0 {
+		return result, body, nil
+	}
+	req := securityAuditRequestMetadata(c, "openai_realtime", "openai", "realtime_request")
+	req.Body = body
+	_, _ = CaptureSecurityAuditRealtimeSnapshot(c, req)
+	shouldRun := shouldRunSensitiveFilter(c)
+	if beforeDistribution {
+		shouldRun = shouldRunSensitiveFilterBeforeDistribution(c)
+	}
+	if !setting.ShouldCheckPromptSensitive() || !shouldRun {
+		return result, body, nil
+	}
+	filter := newSensitiveTextFilter(setting.GetEffectiveSensitiveRulesByScope(setting.SensitiveRuleScopeRequest))
+	if filter.empty() {
+		return result, body, nil
+	}
+	var payload any
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return nil, nil, err
+	}
+
+	blockScan := &requestTextProcessor{filter: filter, mode: setting.SensitiveRuleActionBlock}
+	processRealtimeTextFields(payload, blockScan)
+	if len(blockScan.matches) > 0 {
+		result.Blocked = true
+		result.Matches = blockScan.matches
+		RecordSensitiveWordAuditEvent(c, "realtime_request", result.Matches, nil)
+		return result, body, nil
+	}
+
+	maskScan := &requestTextProcessor{filter: filter, mode: setting.SensitiveRuleActionMask}
+	processRealtimeTextFields(payload, maskScan)
+	if !maskScan.mutated {
+		return result, body, nil
+	}
+	rewritten, err := common.Marshal(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	result.Mutated = true
+	result.Matches = maskScan.matches
+	RecordSensitiveWordAuditEvent(c, "realtime_request", result.Matches, nil)
+	return result, rewritten, nil
+}
+
+// ApplySensitiveFilterToRealtimeResponseFrame 在写给客户端前执行现有返回范围规则。
+func ApplySensitiveFilterToRealtimeResponseFrame(c *gin.Context, body []byte) (*SensitiveFilterResult, []byte, error) {
+	result := &SensitiveFilterResult{}
+	if c == nil || len(bytes.TrimSpace(body)) == 0 || !shouldRunSensitiveFilter(c) {
+		return result, body, nil
+	}
+	filter := newSensitiveTextFilter(setting.GetEffectiveSensitiveRulesByScope(setting.SensitiveRuleScopeResponse))
+	if filter.empty() {
+		return result, body, nil
+	}
+	var payload any
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return nil, nil, err
+	}
+	auditSnapshot := buildSecurityAuditResponseSnapshot(c, payload, "realtime_response")
+
+	blockScan := &responseTextProcessor{filter: filter, mode: setting.SensitiveRuleActionBlock}
+	processRealtimeTextFields(payload, blockScan)
+	if len(blockScan.matches) > 0 {
+		result.Blocked = true
+		result.Matches = blockScan.matches
+		RecordSensitiveWordAuditEvent(c, "realtime_response", result.Matches, auditSnapshot)
+		return result, body, nil
+	}
+
+	maskScan := &responseTextProcessor{filter: filter, mode: setting.SensitiveRuleActionMask}
+	processRealtimeTextFields(payload, maskScan)
+	if !maskScan.mutated {
+		return result, body, nil
+	}
+	rewritten, err := common.Marshal(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	result.Mutated = true
+	result.Matches = maskScan.matches
+	RecordSensitiveWordAuditEvent(c, "realtime_response", result.Matches, auditSnapshot)
+	return result, rewritten, nil
+}
+
+type realtimeSensitiveTextProcessor interface {
+	process(text string) (string, bool)
+}
+
+func processRealtimeTextFields(value any, processor realtimeSensitiveTextProcessor) {
+	processRealtimeTextValue(value, "", processor)
+}
+
+func processRealtimeTextValue(value any, key string, processor realtimeSensitiveTextProcessor) {
+	if processor == nil {
+		return
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		for childKey, childValue := range typed {
+			if text, ok := childValue.(string); ok {
+				if !isRealtimeSensitiveTextField(childKey, text) {
+					continue
+				}
+				updated, changed := processor.process(text)
+				if changed {
+					typed[childKey] = updated
+				}
+				continue
+			}
+			processRealtimeTextValue(childValue, childKey, processor)
+		}
+	case []any:
+		for index, item := range typed {
+			if text, ok := item.(string); ok {
+				if !isRealtimeSensitiveTextField(key, text) {
+					continue
+				}
+				updated, changed := processor.process(text)
+				if changed {
+					typed[index] = updated
+				}
+				continue
+			}
+			processRealtimeTextValue(item, key, processor)
+		}
+	}
+}
+
+func isRealtimeSensitiveTextField(key string, value string) bool {
+	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(key)))
+	switch normalized {
+	case "instructions", "instruction", "text", "inputtext", "outputtext", "transcript",
+		"delta", "prompt", "content", "arguments", "description", "input", "output", "refusal",
+		"context", "title", "question", "message":
+		return !looksLikeEncodedOrURL(value)
+	default:
+		return false
+	}
 }
 
 func ApplySensitiveFilterToStreamDataForSend(c *gin.Context, data string) (*SensitiveStreamDataFilterResult, error) {

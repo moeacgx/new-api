@@ -52,6 +52,14 @@ func SavePromptAuditConfig(req PromptAuditUpdateRequest, actorId int) (*PromptAu
 	if currentRow.ConfigVersion != req.ExpectedConfigVersion {
 		return nil, model.ErrPromptAuditConfigConflict
 	}
+	upstreamPolicyEnabled := currentRow.UpstreamPolicyEnabled
+	if req.UpstreamPolicyEnabled != nil {
+		upstreamPolicyEnabled = *req.UpstreamPolicyEnabled
+	}
+	sensitiveWordAuditEnabled := currentRow.SensitiveWordAuditEnabled
+	if req.SensitiveWordAuditEnabled != nil {
+		sensitiveWordAuditEnabled = *req.SensitiveWordAuditEnabled
+	}
 	currentById := make(map[string]model.PromptAuditEndpoint, len(currentEndpoints))
 	for _, endpoint := range currentEndpoints {
 		currentById[endpoint.Id] = endpoint
@@ -69,15 +77,20 @@ func SavePromptAuditConfig(req PromptAuditUpdateRequest, actorId int) (*PromptAu
 	}
 	summaryJson, err := common.Marshal(map[string]interface{}{
 		"enabled": req.Enabled, "blocking_enabled": req.BlockingEnabled,
-		"store_pass_events": req.StorePassEvents, "endpoint_count": len(req.Endpoints),
-		"scanner_count": len(scanners), "all_groups": req.AllGroups, "group_count": len(groups),
+		"store_pass_events":            req.StorePassEvents,
+		"upstream_policy_enabled":      upstreamPolicyEnabled,
+		"sensitive_word_audit_enabled": sensitiveWordAuditEnabled,
+		"endpoint_count":               len(req.Endpoints),
+		"scanner_count":                len(scanners), "all_groups": req.AllGroups, "group_count": len(groups),
 	})
 	if err != nil {
 		return nil, err
 	}
 	row := &model.PromptAuditConfig{
 		Id: model.PromptAuditConfigID, Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled,
-		StorePassEvents: req.StorePassEvents, Strategy: "priority", WorkerCount: req.WorkerCount,
+		StorePassEvents: req.StorePassEvents, UpstreamPolicyEnabled: upstreamPolicyEnabled,
+		SensitiveWordAuditEnabled: sensitiveWordAuditEnabled,
+		Strategy:                  "priority", WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, RetentionDays: req.RetentionDays,
 		Scanners: string(scannerJson), AllGroups: req.AllGroups, GroupIds: string(groupJson),
 		UpdatedBy: actorId, ChangeSummary: string(summaryJson),

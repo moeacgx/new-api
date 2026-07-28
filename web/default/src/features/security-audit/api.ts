@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ApiEnvelope,
+  SecurityAuditBuiltinPolicy,
+  SecurityAuditBuiltinPolicyUpdate,
   SecurityAuditConfig,
   SecurityAuditConfigDraft,
   SecurityAuditConfigUpdate,
@@ -280,6 +282,25 @@ export async function getSecurityAuditConfig() {
   const response = await api.get<ApiEnvelope<SecurityAuditConfig>>(
     `${API_ROOT}/config`,
     { disableDuplicate: true }
+  )
+  return unwrap(response.data)
+}
+
+export async function getSecurityAuditBuiltinPolicy() {
+  const response = await api.get<ApiEnvelope<SecurityAuditBuiltinPolicy>>(
+    `${API_ROOT}/builtin-policy`,
+    { disableDuplicate: true }
+  )
+  return unwrap(response.data)
+}
+
+export async function updateSecurityAuditBuiltinPolicy(
+  input: SecurityAuditBuiltinPolicyUpdate
+) {
+  const response = await api.put<ApiEnvelope<SecurityAuditBuiltinPolicy>>(
+    `${API_ROOT}/builtin-policy`,
+    input,
+    { skipBusinessError: true }
   )
   return unwrap(response.data)
 }

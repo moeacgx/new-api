@@ -37,6 +37,7 @@ import {
 import {
   Activity,
   FileSearch,
+  ListFilter,
   RefreshCw,
   Save,
   Server,
@@ -54,6 +55,7 @@ import {
   getSecurityAuditRuntime,
   updateSecurityAuditConfig,
 } from './api';
+import BuiltinPolicyTab from './BuiltinPolicyTab';
 import EndpointsTab from './EndpointsTab';
 import EventsTab from './EventsTab';
 import OverviewTab from './OverviewTab';
@@ -218,6 +220,21 @@ const SecurityAudit = () => {
       .catch(() => {});
   };
 
+  const applySavedBuiltinPolicy = (saved) => {
+    const patch = {
+      config_version: saved.config_version,
+      upstream_policy_enabled: saved.upstream_policy_enabled,
+      sensitive_word_audit_enabled: saved.sensitive_word_audit_enabled,
+      updated_at: saved.updated_at,
+      updated_by: saved.updated_by,
+    };
+    setConfig((current) => (current ? { ...current, ...patch } : current));
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+    void getSecurityAuditRuntime()
+      .then(setRuntime)
+      .catch(() => {});
+  };
+
   const saveConfig = async () => {
     if (!draft) return;
     const validationError = validateDraft(draft, runtime, t);
@@ -263,7 +280,7 @@ const SecurityAudit = () => {
               </div>
               <Text type='tertiary' className='mt-1 block'>
                 {t(
-                  '使用 Qwen3Guard 审计提示词，并在独立页面管理策略、节点与事件。',
+                  '统一管理本地屏蔽词、上游安全策略和 Qwen3Guard 提示词审计。',
                 )}
               </Text>
             </div>
@@ -275,15 +292,17 @@ const SecurityAudit = () => {
               >
                 {t('刷新')}
               </Button>
-              <Button
-                type='primary'
-                icon={<Save size={15} />}
-                loading={saving}
-                disabled={!dirty || !draft}
-                onClick={() => void saveConfig()}
-              >
-                {t('保存更改')}
-              </Button>
+              {activeTab !== 'builtin-policy' ? (
+                <Button
+                  type='primary'
+                  icon={<Save size={15} />}
+                  loading={saving}
+                  disabled={!dirty || !draft}
+                  onClick={() => void saveConfig()}
+                >
+                  {t('保存更改')}
+                </Button>
+              ) : null}
             </Space>
           </div>
 
@@ -329,6 +348,22 @@ const SecurityAudit = () => {
                     <EventsTab
                       endpoints={draft.endpoints}
                       runSensitive={runSensitive}
+                    />
+                  </div>
+                </Tabs.TabPane>
+                <Tabs.TabPane
+                  tab={
+                    <Space spacing={6}>
+                      <ListFilter size={15} />
+                      {t('内置策略')}
+                    </Space>
+                  }
+                  itemKey='builtin-policy'
+                >
+                  <div className='pt-4'>
+                    <BuiltinPolicyTab
+                      runSensitive={runSensitive}
+                      onSaved={applySavedBuiltinPolicy}
                     />
                   </div>
                 </Tabs.TabPane>

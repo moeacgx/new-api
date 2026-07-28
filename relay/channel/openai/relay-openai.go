@@ -546,6 +546,22 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 			}
 			return nil
 		}
+		// 屏蔽词 mask 只改写实际转发帧；Guard 仍审核客户端提交的
+		// 原始帧，避免替换文本掩盖语义风险。
+		guardMessage := append([]byte(nil), message...)
+		filterResult, filteredMessage, filterErr := service.ApplySensitiveFilterToRealtimeRequestFrame(c, message)
+		if filterErr != nil {
+			writeRealtimeProtocolError(types.ErrorCodeInvalidRequest,
+				"Realtime 客户端帧格式无效",
+				websocket.CloseInvalidFramePayloadData, "invalid_realtime_frame")
+			return fmt.Errorf("error filtering realtime request frame: %w", filterErr)
+		}
+		if filterResult.Blocked {
+			writeRealtimeProtocolError(types.ErrorCodeSensitiveWordsDetected,
+				"sensitive words detected", 4403, string(types.ErrorCodeSensitiveWordsDetected))
+			return fmt.Errorf("sensitive rules rejected realtime frame")
+		}
+		message = filteredMessage
 		realtimeEvent := &dto.RealtimeEvent{}
 		if err := common.Unmarshal(message, realtimeEvent); err != nil {
 			// 后续客户端帧在渠道建立后仍可能是畸形 JSON。不能只记录日志
@@ -558,7 +574,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 		}
 		if promptAuditActive && !alreadyAudited {
 			decision, _, err := service.AuditPromptRealtimeFrame(
-				c.Request.Context(), promptAuditRealtimeRequest(c, info, message),
+				c.Request.Context(), promptAuditRealtimeRequest(c, info, guardMessage),
 			)
 			if err != nil {
 				writeRealtimeProtocolError(types.ErrorCodeInvalidRequest,
@@ -659,6 +675,18 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					close(targetClosed)
 					return
 				}
+				service.RecordUpstreamPolicyPayload(c, message, "realtime_response")
+				filterResult, filteredMessage, filterErr := service.ApplySensitiveFilterToRealtimeResponseFrame(c, message)
+				if filterErr != nil {
+					errChan <- fmt.Errorf("error filtering realtime response frame: %v", filterErr)
+					return
+				}
+				if filterResult.Blocked {
+					writeRealtimeProtocolError(types.ErrorCodeSensitiveWordsDetected,
+						"sensitive words detected", 4403, string(types.ErrorCodeSensitiveWordsDetected))
+					return
+				}
+				message = filteredMessage
 				info.SetFirstResponseTime()
 				realtimeEvent := &dto.RealtimeEvent{}
 				err = common.Unmarshal(message, realtimeEvent)

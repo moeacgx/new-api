@@ -37,6 +37,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -102,6 +103,50 @@ import type {
 } from './types'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+
+function eventSourceLabel(source: string, t: (key: string) => string): string {
+  switch (source) {
+    case 'sensitive_word':
+      return t('Sensitive words')
+    case 'upstream_policy':
+      return t('Upstream policy')
+    case 'prompt_guard':
+      return t('Prompt Guard')
+    default:
+      return source || t('Prompt Guard')
+  }
+}
+
+function eventStageLabel(stage: string, t: (key: string) => string): string {
+  switch (stage) {
+    case 'request':
+      return t('Request')
+    case 'response':
+      return t('Response')
+    case 'response_stream':
+      return t('Streaming response')
+    case 'realtime_request':
+      return t('Realtime request')
+    case 'realtime_response':
+      return t('Realtime response')
+    case 'task_response':
+      return t('Task response')
+    case 'http':
+      return t('HTTP request')
+    case 'realtime':
+      return t('Realtime request')
+    case 'async_worker':
+      return t('Async worker')
+    default:
+      return stage || '-'
+  }
+}
+
+function formatRiskScore(score: number): string {
+  if (!Number.isFinite(score) || score <= 0) return '-'
+  const percentage = score <= 1 ? score * 100 : score
+  return `${percentage.toFixed(percentage % 1 === 0 ? 0 : 1)}%`
+}
 
 function DetailItem({
   label,
@@ -176,9 +221,9 @@ export function SecurityAuditEventsView({
         }
       },
       {
-        title: t('Verify prompt access'),
+        title: t('Verify audit event access'),
         description: t(
-          'The full prompt is encrypted at rest. Confirm your identity before temporarily decrypting it.'
+          'Audit details may contain a temporarily decrypted prompt. Confirm your identity before viewing them.'
         ),
       }
     )
@@ -243,17 +288,43 @@ export function SecurityAuditEventsView({
         cell: ({ row }) => (
           <div className='max-w-md'>
             <p className='line-clamp-2 break-all'>
-              {row.original.redacted_preview || t('No preview')}
+              {row.original.prompt_available
+                ? row.original.redacted_preview || t('No preview')
+                : t('Prompt content was not stored')}
             </p>
-            <p className='text-muted-foreground mt-1 font-mono text-xs'>
-              {row.original.prompt_hash.slice(0, 16)}…
-            </p>
+            {row.original.prompt_hash ? (
+              <p className='text-muted-foreground mt-1 font-mono text-xs'>
+                {row.original.prompt_hash.slice(0, 16)}…
+              </p>
+            ) : null}
           </div>
         ),
       },
       {
-        id: 'source',
-        header: t('Source'),
+        accessorKey: 'source',
+        header: t('Audit source'),
+        cell: ({ row }) => (
+          <div className='flex min-w-32 flex-col items-start gap-1'>
+            <Badge
+              variant={
+                row.original.source === 'prompt_guard'
+                  ? 'default'
+                  : row.original.source === 'sensitive_word'
+                    ? 'secondary'
+                    : 'outline'
+              }
+            >
+              {eventSourceLabel(row.original.source, t)}
+            </Badge>
+            <span className='text-muted-foreground text-xs'>
+              {eventStageLabel(row.original.stage, t)}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: 'model-endpoint',
+        header: t('Model / endpoint'),
         cell: ({ row }) => (
           <div className='flex min-w-32 flex-col gap-0.5'>
             <span className='truncate'>{row.original.model || '-'}</span>
@@ -267,16 +338,21 @@ export function SecurityAuditEventsView({
         id: 'risk',
         header: t('Risk'),
         cell: ({ row }) => (
-          <div className='flex max-w-48 flex-wrap gap-1'>
-            {(row.original.categories ?? []).length > 0 ? (
-              row.original.categories.slice(0, 2).map((category) => (
-                <Badge key={category} variant='outline'>
-                  {category}
-                </Badge>
-              ))
-            ) : (
-              <span className='text-muted-foreground'>-</span>
-            )}
+          <div className='flex max-w-48 flex-col items-start gap-1'>
+            <div className='flex flex-wrap gap-1'>
+              {(row.original.categories ?? []).length > 0 ? (
+                row.original.categories.slice(0, 2).map((category) => (
+                  <Badge key={category} variant='outline'>
+                    {category}
+                  </Badge>
+                ))
+              ) : (
+                <span className='text-muted-foreground'>-</span>
+              )}
+            </div>
+            <span className='text-muted-foreground text-xs tabular-nums'>
+              {formatRiskScore(row.original.risk_score)}
+            </span>
           </div>
         ),
       },
@@ -295,7 +371,7 @@ export function SecurityAuditEventsView({
               size='icon-sm'
               onClick={() => void openDetail(row.original)}
               disabled={detailLoading === row.original.id}
-              aria-label={t('View full prompt')}
+              aria-label={t('View event details')}
             >
               {detailLoading === row.original.id ? (
                 <Spinner />
@@ -547,6 +623,123 @@ export function SecurityAuditEventsView({
                     </Select>
                   </Field>
                   <Field>
+                    <FieldLabel>{t('Audit source')}</FieldLabel>
+                    <Select
+                      items={[
+                        { value: 'all', label: t('All sources') },
+                        { value: 'prompt_guard', label: t('Prompt Guard') },
+                        {
+                          value: 'sensitive_word',
+                          label: t('Sensitive words'),
+                        },
+                        {
+                          value: 'upstream_policy',
+                          label: t('Upstream policy'),
+                        },
+                      ]}
+                      value={draftFilter.source || 'all'}
+                      onValueChange={(value) =>
+                        setDraftFilter((current) => ({
+                          ...current,
+                          source:
+                            value === 'all' || value === null ? '' : value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger aria-label={t('Audit source')}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='all'>
+                            {t('All sources')}
+                          </SelectItem>
+                          <SelectItem value='prompt_guard'>
+                            {t('Prompt Guard')}
+                          </SelectItem>
+                          <SelectItem value='sensitive_word'>
+                            {t('Sensitive words')}
+                          </SelectItem>
+                          <SelectItem value='upstream_policy'>
+                            {t('Upstream policy')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t('Stage')}</FieldLabel>
+                    <Select
+                      items={[
+                        { value: 'all', label: t('All stages') },
+                        { value: 'request', label: t('Request') },
+                        { value: 'response', label: t('Response') },
+                        {
+                          value: 'response_stream',
+                          label: t('Streaming response'),
+                        },
+                        {
+                          value: 'realtime_request',
+                          label: t('Realtime request'),
+                        },
+                        {
+                          value: 'realtime_response',
+                          label: t('Realtime response'),
+                        },
+                        {
+                          value: 'task_response',
+                          label: t('Task response'),
+                        },
+                        { value: 'http', label: t('HTTP request') },
+                        { value: 'realtime', label: t('Realtime request') },
+                        { value: 'async_worker', label: t('Async worker') },
+                      ]}
+                      value={draftFilter.stage || 'all'}
+                      onValueChange={(value) =>
+                        setDraftFilter((current) => ({
+                          ...current,
+                          stage: value === 'all' || value === null ? '' : value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger aria-label={t('Stage')}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='all'>{t('All stages')}</SelectItem>
+                          <SelectItem value='request'>
+                            {t('Request')}
+                          </SelectItem>
+                          <SelectItem value='response'>
+                            {t('Response')}
+                          </SelectItem>
+                          <SelectItem value='response_stream'>
+                            {t('Streaming response')}
+                          </SelectItem>
+                          <SelectItem value='realtime_request'>
+                            {t('Realtime request')}
+                          </SelectItem>
+                          <SelectItem value='realtime_response'>
+                            {t('Realtime response')}
+                          </SelectItem>
+                          <SelectItem value='task_response'>
+                            {t('Task response')}
+                          </SelectItem>
+                          <SelectItem value='http'>
+                            {t('HTTP request')}
+                          </SelectItem>
+                          <SelectItem value='realtime'>
+                            {t('Realtime request')}
+                          </SelectItem>
+                          <SelectItem value='async_worker'>
+                            {t('Async worker')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
                     <FieldLabel>{t('Guard node')}</FieldLabel>
                     <Select
                       items={[
@@ -710,7 +903,7 @@ export function SecurityAuditEventsView({
             <DialogTitle>{t('Audit event details')}</DialogTitle>
             <DialogDescription>
               {t(
-                'This response is not cached. Close the dialog when you finish reviewing the decrypted prompt.'
+                'This response is not cached. Close the dialog when you finish reviewing sensitive audit details.'
               )}
             </DialogDescription>
           </DialogHeader>
@@ -727,6 +920,14 @@ export function SecurityAuditEventsView({
                   value={<DecisionBadge decision={detail.decision} t={t} />}
                 />
                 <DetailItem label={t('Risk level')} value={detail.risk_level} />
+                <DetailItem
+                  label={t('Audit source')}
+                  value={eventSourceLabel(detail.source, t)}
+                />
+                <DetailItem
+                  label={t('Stage')}
+                  value={eventStageLabel(detail.stage, t)}
+                />
                 <DetailItem
                   label={t('User')}
                   value={detail.username || detail.user_id}
@@ -753,35 +954,50 @@ export function SecurityAuditEventsView({
                   label={t('Latency')}
                   value={`${detail.latency_ms} ms`}
                 />
+                <DetailItem
+                  label={t('Risk score')}
+                  value={formatRiskScore(detail.risk_score)}
+                />
               </div>
-              <div className='flex flex-col gap-2'>
-                <div className='flex flex-wrap items-center justify-between gap-2'>
-                  <h4 className='font-medium'>{t('Decrypted prompt')}</h4>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(detail.full_prompt)
-                      toast.success(t('Copied'))
-                    }}
-                  >
-                    <HugeiconsIcon
-                      icon={Copy01Icon}
-                      strokeWidth={2}
-                      data-icon='inline-start'
-                    />
-                    {t('Copy')}
-                  </Button>
+              {detail.prompt_available && detail.full_prompt ? (
+                <div className='flex flex-col gap-2'>
+                  <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <h4 className='font-medium'>{t('Decrypted prompt')}</h4>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(detail.full_prompt)
+                        toast.success(t('Copied'))
+                      }}
+                    >
+                      <HugeiconsIcon
+                        icon={Copy01Icon}
+                        strokeWidth={2}
+                        data-icon='inline-start'
+                      />
+                      {t('Copy')}
+                    </Button>
+                  </div>
+                  <pre className='bg-muted max-h-[45vh] overflow-auto rounded-lg p-4 text-xs break-words whitespace-pre-wrap'>
+                    {detail.full_prompt}
+                  </pre>
+                  {detail.prompt_truncated ? (
+                    <Badge variant='outline'>
+                      {t('Stored prompt was truncated')}
+                    </Badge>
+                  ) : null}
                 </div>
-                <pre className='bg-muted max-h-[45vh] overflow-auto rounded-lg p-4 text-xs break-words whitespace-pre-wrap'>
-                  {detail.full_prompt}
-                </pre>
-                {detail.prompt_truncated && (
-                  <Badge variant='outline'>
-                    {t('Stored prompt was truncated')}
-                  </Badge>
-                )}
-              </div>
+              ) : (
+                <Alert>
+                  <AlertTitle>{t('Prompt content was not stored')}</AlertTitle>
+                  <AlertDescription>
+                    {t(
+                      'This event keeps only an irreversible hash, length, source, and technical metadata because encrypted prompt storage was unavailable.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
           <DialogFooter>

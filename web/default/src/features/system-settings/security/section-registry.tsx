@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { RateLimitSection } from '../request-limits/rate-limit-section'
-import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
 import type { SecuritySettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -38,21 +37,6 @@ const SECURITY_SECTIONS = [
           ModelRequestRateLimitGroup: settings.ModelRequestRateLimitGroup,
           ModelRequestRateLimitUserGroup:
             settings.ModelRequestRateLimitUserGroup,
-        }}
-      />
-    ),
-  },
-  {
-    id: 'sensitive-words',
-    titleKey: 'Sensitive Words',
-    build: (settings: SecuritySettings) => (
-      <SensitiveWordsSection
-        defaultValues={{
-          CheckSensitiveEnabled: settings.CheckSensitiveEnabled,
-          CheckSensitiveOnPromptEnabled: settings.CheckSensitiveOnPromptEnabled,
-          SensitiveWords: settings.SensitiveWords,
-          SensitiveRules: settings.SensitiveRules,
-          SensitiveRuleChannelIds: settings.SensitiveRuleChannelIds,
         }}
       />
     ),

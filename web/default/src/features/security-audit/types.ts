@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export type SecurityAuditMode = 'off' | 'async_audit' | 'blocking'
 export type SecurityAuditTokenAction = 'keep' | 'replace' | 'clear'
 
@@ -55,6 +54,8 @@ export interface SecurityAuditEndpointDraft extends SecurityAuditEndpoint {
 export interface SecurityAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
+  upstream_policy_enabled: boolean
+  sensitive_word_audit_enabled: boolean
   store_pass_events: boolean
   effective_mode: SecurityAuditMode
   strategy: 'priority'
@@ -180,9 +181,13 @@ export interface SecurityAuditEvent {
   redacted_preview: string
   prompt_length: number
   prompt_truncated: boolean
+  prompt_available: boolean
   message_count: number
+  source: 'prompt_guard' | 'sensitive_word' | 'upstream_policy' | string
+  stage: string
   decision: string
   risk_level: string
+  risk_score: number
   action: string
   safety: string
   categories: string[]
@@ -202,6 +207,8 @@ export interface SecurityAuditEventDetail extends SecurityAuditEvent {
 }
 
 export interface SecurityAuditEventFilter {
+  source?: string
+  stage?: string
   decision?: string
   risk_level?: string
   endpoint?: string
@@ -213,6 +220,30 @@ export interface SecurityAuditEventFilter {
   group_id?: number
   start_at?: number
   end_at?: number
+}
+
+export interface SecurityAuditBuiltinPolicy {
+  config_version: number
+  upstream_policy_enabled: boolean
+  sensitive_word_audit_enabled: boolean
+  check_sensitive_enabled: boolean
+  check_sensitive_on_prompt_enabled: boolean
+  sensitive_words: string
+  sensitive_rules: string
+  sensitive_rule_channel_ids: string
+  uses_legacy_sensitive_words: boolean
+  updated_at: number
+  updated_by: number
+}
+
+export interface SecurityAuditBuiltinPolicyUpdate {
+  expected_version: number
+  upstream_policy_enabled: boolean
+  sensitive_word_audit_enabled: boolean
+  check_sensitive_enabled: boolean
+  check_sensitive_on_prompt_enabled: boolean
+  sensitive_rules: string
+  sensitive_rule_channel_ids: string
 }
 
 export interface SecurityAuditEventPage {

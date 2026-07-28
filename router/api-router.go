@@ -364,6 +364,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			securityAuditRoute.GET("/config", controller.GetPromptAuditConfig)
 			securityAuditRoute.PUT("/config", middleware.CriticalRateLimit(), middleware.SecureVerificationRequired(), controller.UpdatePromptAuditConfig)
+			securityAuditRoute.GET("/builtin-policy", controller.GetSecurityAuditBuiltinPolicy)
+			securityAuditRoute.PUT("/builtin-policy", middleware.CriticalRateLimit(), middleware.SecureVerificationRequired(), controller.UpdateSecurityAuditBuiltinPolicy)
 			securityAuditRoute.POST("/endpoints/probe", middleware.CriticalRateLimit(), middleware.SecureVerificationRequired(), controller.ProbePromptAuditEndpoint)
 			securityAuditRoute.GET("/runtime", controller.GetPromptAuditRuntime)
 			securityAuditRoute.GET("/events", controller.ListPromptAuditEvents)

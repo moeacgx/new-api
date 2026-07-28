@@ -34,7 +34,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { IconDelete, IconPlus } from '@douyinfe/semi-icons';
-import { API, showError, showSuccess, showWarning } from '../../../helpers';
+import { API, showError, showWarning } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
 const ACTION_MASK = 'mask';
@@ -224,7 +224,7 @@ function getPrefillGroupLabel(group) {
 
 export default function SettingsSensitiveWords(props) {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channels, setChannels] = useState([]);
   const [sensitiveGroupsLoading, setSensitiveGroupsLoading] = useState(false);
@@ -246,6 +246,14 @@ export default function SettingsSensitiveWords(props) {
     () => serializeChannelIds(selectedChannelIds),
     [selectedChannelIds],
   );
+  const hasChanges =
+    props.externalDirty === true ||
+    inputs.CheckSensitiveEnabled !== inputsRow.CheckSensitiveEnabled ||
+    inputs.CheckSensitiveOnPromptEnabled !==
+      inputsRow.CheckSensitiveOnPromptEnabled ||
+    currentRulesValue !== inputsRow.SensitiveRules ||
+    currentChannelIdsValue !== inputsRow.SensitiveRuleChannelIds;
+  const isSaving = saving || props.saving === true;
   const selectedChannelSummary =
     selectedChannelIds.length === 0
       ? t('不应用任何渠道')
@@ -311,7 +319,7 @@ export default function SettingsSensitiveWords(props) {
   };
 
   const resetFormState = (values) => {
-    const nextInputs = {
+    const rawInputs = {
       CheckSensitiveEnabled: false,
       CheckSensitiveOnPromptEnabled: false,
       SensitiveWords: '',
@@ -319,61 +327,45 @@ export default function SettingsSensitiveWords(props) {
       SensitiveRuleChannelIds: '[]',
       ...values,
     };
+    const nextRules = parseRulesConfig(
+      rawInputs.SensitiveRules,
+      rawInputs.SensitiveWords,
+    );
+    const nextChannelIds = parseChannelIds(rawInputs.SensitiveRuleChannelIds);
+    const nextInputs = {
+      ...rawInputs,
+      SensitiveRules: serializeRules(nextRules),
+      SensitiveRuleChannelIds: serializeChannelIds(nextChannelIds),
+    };
 
     setInputs(nextInputs);
     setInputsRow({ ...nextInputs });
-    setRules(
-      parseRulesConfig(nextInputs.SensitiveRules, nextInputs.SensitiveWords),
-    );
-    setSelectedChannelIds(parseChannelIds(nextInputs.SensitiveRuleChannelIds));
+    setRules(nextRules);
+    setSelectedChannelIds(nextChannelIds);
     refForm.current?.setValues(nextInputs);
   };
 
-  function onSubmit() {
+  const onSubmit = async () => {
     const submitInputs = {
       ...inputs,
-      SensitiveWords: '',
       SensitiveRules: currentRulesValue,
       SensitiveRuleChannelIds: currentChannelIdsValue,
     };
-    const updateArray = Object.keys(submitInputs)
-      .filter((key) => submitInputs[key] !== inputsRow[key])
-      .map((key) => ({ key, value: submitInputs[key] }));
+    if (!hasChanges) return showWarning(t('你似乎并没有修改什么'));
+    if (typeof props.onSave !== 'function') return;
 
-    if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) => {
-      let value = '';
-      if (typeof submitInputs[item.key] === 'boolean') {
-        value = String(submitInputs[item.key]);
-      } else {
-        value = submitInputs[item.key];
-      }
-      return API.put('/api/option/', {
-        key: item.key,
-        value,
-      });
-    });
-    setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
-        }
-        showSuccess(t('保存成功'));
-        setInputs(submitInputs);
-        setInputsRow({ ...submitInputs });
-        props.refresh();
-      })
-      .catch(() => {
-        showError(t('保存失败，请重试'));
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }
+    setSaving(true);
+    try {
+      await props.onSave(submitInputs);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onReset = () => {
+    resetFormState(inputsRow);
+    props.onResetExternal?.();
+  };
 
   useEffect(() => {
     const currentInputs = {};
@@ -383,7 +375,13 @@ export default function SettingsSensitiveWords(props) {
       }
     }
     resetFormState(currentInputs);
-  }, [props.options]);
+  }, [
+    props.options.CheckSensitiveEnabled,
+    props.options.CheckSensitiveOnPromptEnabled,
+    props.options.SensitiveRuleChannelIds,
+    props.options.SensitiveRules,
+    props.options.SensitiveWords,
+  ]);
 
   useEffect(() => {
     fetchChannels();
@@ -392,7 +390,7 @@ export default function SettingsSensitiveWords(props) {
 
   return (
     <>
-      <Spin spinning={loading}>
+      <Spin spinning={isSaving}>
         <Form
           values={inputs}
           getFormApi={(formAPI) => (refForm.current = formAPI)}
@@ -705,14 +703,25 @@ export default function SettingsSensitiveWords(props) {
                 ))}
               </Space>
             )}
-            <Row>
-              <Button
-                size='default'
-                onClick={onSubmit}
-                style={{ marginTop: 16 }}
-              >
-                {t('保存屏蔽词过滤设置')}
-              </Button>
+            <Row type='flex' justify='end'>
+              <Space style={{ marginTop: 16 }}>
+                <Button
+                  size='default'
+                  disabled={!hasChanges || isSaving}
+                  onClick={onReset}
+                >
+                  {t('重置')}
+                </Button>
+                <Button
+                  type='primary'
+                  size='default'
+                  loading={isSaving}
+                  disabled={!hasChanges || isSaving}
+                  onClick={() => void onSubmit()}
+                >
+                  {t('保存屏蔽词过滤设置')}
+                </Button>
+              </Space>
             </Row>
           </Form.Section>
         </Form>

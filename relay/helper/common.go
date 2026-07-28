@@ -139,6 +139,7 @@ func StringData(c *gin.Context, str string) error {
 		return nil
 	}
 
+	service.RecordUpstreamPolicyPayload(c, []byte(str), "response_stream")
 	result, err := service.ApplySensitiveFilterToStreamDataForSend(c, str)
 	if err != nil {
 		return err
@@ -180,6 +181,7 @@ func ObjectData(c *gin.Context, object interface{}) error {
 }
 
 func writeFilteredEventData(c *gin.Context, eventLine string, data string) (bool, error) {
+	service.RecordUpstreamPolicyPayload(c, []byte(data), "response_stream")
 	result, err := service.ApplySensitiveFilterToStreamDataForSend(c, data)
 	if err != nil {
 		return false, err

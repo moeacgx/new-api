@@ -148,6 +148,8 @@ func DeletePromptAuditByIDs(ids []int64) (*PromptAuditDeleteResult, error) {
 }
 
 func normalizePromptAuditDeleteFilter(filter model.PromptAuditEventFilter) model.PromptAuditEventFilter {
+	filter.Source = strings.ToLower(strings.TrimSpace(filter.Source))
+	filter.Stage = strings.ToLower(strings.TrimSpace(filter.Stage))
 	filter.Decision = strings.ToLower(strings.TrimSpace(filter.Decision))
 	filter.RiskLevel = strings.ToLower(strings.TrimSpace(filter.RiskLevel))
 	filter.Endpoint = strings.TrimSpace(filter.Endpoint)
@@ -165,7 +167,7 @@ func validatePromptAuditDeleteFilter(filter model.PromptAuditEventFilter) error 
 	if filter.StartAt > 0 && filter.EndAt > 0 && filter.StartAt > filter.EndAt {
 		return errors.New("开始时间不能晚于结束时间")
 	}
-	if filter.Decision == "" && filter.RiskLevel == "" && filter.Endpoint == "" &&
+	if filter.Source == "" && filter.Stage == "" && filter.Decision == "" && filter.RiskLevel == "" && filter.Endpoint == "" &&
 		filter.RequestId == "" && filter.PromptHash == "" && filter.Keyword == "" &&
 		filter.UserId == 0 && filter.TokenId == 0 && filter.GroupId == 0 &&
 		filter.StartAt == 0 && filter.EndAt == 0 {

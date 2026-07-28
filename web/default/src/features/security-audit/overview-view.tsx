@@ -94,8 +94,7 @@ export function SecurityAuditOverviewView({
   const utilization = queue?.capacity
     ? Math.min(100, Math.round((queue.active / queue.capacity) * 100))
     : 0
-  const errorCount =
-    (metrics?.unavailable ?? 0) + (metrics?.invalid ?? 0)
+  const errorCount = (metrics?.unavailable ?? 0) + (metrics?.invalid ?? 0)
   const errorRate = metrics?.total
     ? `${((errorCount / metrics.total) * 100).toFixed(2)}%`
     : '0.00%'
@@ -103,22 +102,49 @@ export function SecurityAuditOverviewView({
   return (
     <div className='flex flex-col gap-4'>
       {!runtime?.crypto_ready && (
-        <Alert variant='destructive'>
+        <Alert>
           <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={2} />
-          <AlertTitle>{t('CRYPTO_SECRET is not configured')}</AlertTitle>
+          <AlertTitle>
+            {t('Encrypted prompt storage is unavailable')}
+          </AlertTitle>
           <AlertDescription>
             {t(
-              'Configure a stable CRYPTO_SECRET before enabling audit or saving Guard tokens.'
+              'Prompt Guard and Guard token storage require CRYPTO_SECRET. Built-in detections continue to work and save metadata without recoverable prompt text.'
             )}
           </AlertDescription>
         </Alert>
       )}
 
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('Built-in detections')}</CardTitle>
+          <CardDescription>
+            {t('These detections run without a configured Guard node.')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='flex flex-wrap gap-2'>
+          <Badge
+            variant={
+              config.sensitive_word_audit_enabled ? 'default' : 'secondary'
+            }
+          >
+            {t('Sensitive word events')}:{' '}
+            {config.sensitive_word_audit_enabled ? t('Enabled') : t('Disabled')}
+          </Badge>
+          <Badge
+            variant={config.upstream_policy_enabled ? 'default' : 'secondary'}
+          >
+            {t('Upstream policy events')}:{' '}
+            {config.upstream_policy_enabled ? t('Enabled') : t('Disabled')}
+          </Badge>
+        </CardContent>
+      </Card>
+
       <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
         <StatCard
-          title={t('Audit mode')}
+          title={t('Prompt Guard mode')}
           value={<SecurityAuditModeBadge mode={config.mode} t={t} />}
-          description={t('Current request gate behavior')}
+          description={t('Current optional Guard request gate behavior')}
           icon={Activity01Icon}
         />
         <StatCard

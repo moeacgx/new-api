@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { MultiSelect } from '@/components/multi-select'
@@ -87,7 +88,7 @@ type SensitiveRulesConfig = {
   rules?: SensitiveRule[]
 }
 
-type SensitiveFormValues = {
+export type SensitiveFormValues = {
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
   SensitiveWords?: string
@@ -97,6 +98,12 @@ type SensitiveFormValues = {
 
 type SensitiveWordsSectionProps = {
   defaultValues: SensitiveFormValues
+  inlineActions?: boolean
+  hideTitle?: boolean
+  externalDirty?: boolean
+  isSaving?: boolean
+  onSaveValues?: (values: SensitiveFormValues) => Promise<void>
+  onResetExternal?: () => void
 }
 
 function splitKeywords(value: string) {
@@ -280,6 +287,12 @@ function getPrefillGroupLabel(group: PrefillGroup) {
 
 export function SensitiveWordsSection({
   defaultValues,
+  inlineActions = false,
+  hideTitle = false,
+  externalDirty = false,
+  isSaving: externalSaving = false,
+  onSaveValues,
+  onResetExternal,
 }: SensitiveWordsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -369,6 +382,7 @@ export function SensitiveWordsSection({
           )
         : t('{{count}} channels selected', { count: selectedChannelIds.length })
   const hasChanges =
+    externalDirty ||
     filterEnabled !== defaultValues.CheckSensitiveEnabled ||
     promptEnabled !== defaultValues.CheckSensitiveOnPromptEnabled ||
     currentRulesValue !== initialRulesValue ||
@@ -386,7 +400,13 @@ export function SensitiveWordsSection({
     setSelectedChannelIds(
       parseChannelIds(defaultValues.SensitiveRuleChannelIds)
     )
-  }, [defaultValues])
+  }, [
+    defaultValues.CheckSensitiveEnabled,
+    defaultValues.CheckSensitiveOnPromptEnabled,
+    defaultValues.SensitiveRuleChannelIds,
+    defaultValues.SensitiveRules,
+    defaultValues.SensitiveWords,
+  ])
 
   const updateRule = (id: string, patch: Partial<SensitiveRuleDraft>) => {
     setRules((prev) =>
@@ -395,6 +415,17 @@ export function SensitiveWordsSection({
   }
 
   const onSubmit = async () => {
+    if (onSaveValues) {
+      await onSaveValues({
+        CheckSensitiveEnabled: filterEnabled,
+        CheckSensitiveOnPromptEnabled: promptEnabled,
+        SensitiveWords: defaultValues.SensitiveWords,
+        SensitiveRules: currentRulesValue,
+        SensitiveRuleChannelIds: currentChannelIdsValue,
+      })
+      return
+    }
+
     const updates: Array<{ key: string; value: string | boolean }> = []
     if (filterEnabled !== defaultValues.CheckSensitiveEnabled) {
       updates.push({ key: 'CheckSensitiveEnabled', value: filterEnabled })
@@ -435,7 +466,10 @@ export function SensitiveWordsSection({
     setSelectedChannelIds(
       parseChannelIds(defaultValues.SensitiveRuleChannelIds)
     )
+    onResetExternal?.()
   }
+
+  const isSaving = externalSaving || updateOption.isPending
 
   const toggleChannel = (channelId: number, checked: boolean) => {
     setSelectedChannelIds((prev) =>
@@ -446,21 +480,45 @@ export function SensitiveWordsSection({
   }
 
   return (
-    <SettingsSection title={t('Sensitive Words')}>
+    <SettingsSection
+      title={t('Sensitive Words')}
+      titleProps={hideTitle ? { className: 'sr-only' } : undefined}
+    >
       <SettingsForm
         onSubmit={(event) => {
           event.preventDefault()
           void onSubmit()
         }}
       >
-        <SettingsPageFormActions
-          onSave={() => void onSubmit()}
-          onReset={onReset}
-          isSaving={updateOption.isPending}
-          isSaveDisabled={!hasChanges}
-          isResetDisabled={!hasChanges}
-          saveLabel='Save sensitive rules'
-        />
+        {inlineActions ? (
+          <div
+            data-settings-form-span='full'
+            className='flex flex-wrap items-center justify-end gap-2'
+          >
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={onReset}
+              disabled={!hasChanges || isSaving}
+            >
+              {t('Reset')}
+            </Button>
+            <Button type='submit' size='sm' disabled={!hasChanges || isSaving}>
+              {isSaving ? <Spinner data-icon='inline-start' /> : null}
+              {t(isSaving ? 'Saving...' : 'Save sensitive rules')}
+            </Button>
+          </div>
+        ) : (
+          <SettingsPageFormActions
+            onSave={() => void onSubmit()}
+            onReset={onReset}
+            isSaving={isSaving}
+            isSaveDisabled={!hasChanges}
+            isResetDisabled={!hasChanges}
+            saveLabel='Save sensitive rules'
+          />
+        )}
 
         <div data-settings-form-span='full' className='space-y-4'>
           <SettingsSwitchField

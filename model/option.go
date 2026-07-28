@@ -1040,6 +1040,15 @@ func updateOptionMap(key string, value string) (err error) {
 
 func validateOptionValue(key string, value string) error {
 	switch key {
+	case PromptAuditOptionCheckSensitiveEnabled, PromptAuditOptionCheckSensitiveOnPromptEnabled:
+		if value != "true" && value != "false" {
+			return fmt.Errorf("屏蔽词开关必须是 true 或 false")
+		}
+		return nil
+	case PromptAuditOptionSensitiveRules:
+		return setting.CheckSensitiveRulesJSONString(value)
+	case PromptAuditOptionSensitiveRuleChannelIds:
+		return setting.CheckSensitiveRuleChannelIdsJSONString(value)
 	case "AutoGroupConfig":
 		var config setting.AutoGroupConfig
 		if err := common.UnmarshalJsonStr(value, &config); err != nil {
