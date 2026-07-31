@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,7 +31,17 @@ type OidcUser struct {
 	Email             string `json:"email"`
 	Name              string `json:"name"`
 	PreferredUsername string `json:"preferred_username"`
+	Username          string `json:"username"`
 	Picture           string `json:"picture"`
+}
+
+func (user *OidcUser) resolvedUsername() string {
+	for _, candidate := range []string{user.PreferredUsername, user.Username, user.Email} {
+		if username := strings.TrimSpace(candidate); username != "" {
+			return username
+		}
+	}
+	return ""
 }
 
 func getOidcUserInfoByCode(code string) (*OidcUser, error) {
@@ -63,7 +72,7 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 	}
 	defer res.Body.Close()
 	var oidcResponse OidcResponse
-	err = json.NewDecoder(res.Body).Decode(&oidcResponse)
+	err = common.DecodeJson(res.Body, &oidcResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +99,7 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 	}
 
 	var oidcUser OidcUser
-	err = json.NewDecoder(res2.Body).Decode(&oidcUser)
+	err = common.DecodeJson(res2.Body, &oidcUser)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +141,7 @@ func OidcAuth(c *gin.Context) {
 	user := model.User{
 		OidcId: oidcUser.OpenID,
 	}
+	created := false
 	if model.IsOidcIdAlreadyTaken(user.OidcId) {
 		err := user.FillUserByOidcId()
 		if err != nil {
@@ -144,13 +154,17 @@ func OidcAuth(c *gin.Context) {
 	} else {
 		if common.RegisterEnabled {
 			user.Email = oidcUser.Email
-			if oidcUser.PreferredUsername != "" {
-				user.Username = oidcUser.PreferredUsername
-			} else {
-				user.Username = "oidc_" + strconv.Itoa(model.GetMaxUserId()+1)
+			user.Username = "oidc_" + strconv.Itoa(model.GetMaxUserId()+1)
+			if resolved := oidcUser.resolvedUsername(); resolved != "" &&
+				len(resolved) <= model.UserNameMaxLength {
+				if exists, err := model.CheckUserExistOrDeleted(resolved, ""); err == nil && !exists {
+					user.Username = resolved
+				}
 			}
 			if oidcUser.Name != "" {
 				user.DisplayName = oidcUser.Name
+			} else if user.Username != "" {
+				user.DisplayName = user.Username
 			} else {
 				user.DisplayName = "OIDC User"
 			}
@@ -162,6 +176,7 @@ func OidcAuth(c *gin.Context) {
 				})
 				return
 			}
+			created = true
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -177,6 +192,12 @@ func OidcAuth(c *gin.Context) {
 			"success": false,
 		})
 		return
+	}
+	if created {
+		if err := createDefaultTokenForUser(&user); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	setupLogin(&user, c)
 }

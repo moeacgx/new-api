@@ -37,7 +37,17 @@ type oidcUser struct {
 	Email             string `json:"email"`
 	Name              string `json:"name"`
 	PreferredUsername string `json:"preferred_username"`
+	Username          string `json:"username"`
 	Picture           string `json:"picture"`
+}
+
+func (user *oidcUser) resolvedUsername() string {
+	for _, candidate := range []string{user.PreferredUsername, user.Username, user.Email} {
+		if username := strings.TrimSpace(candidate); username != "" {
+			return username
+		}
+	}
+	return ""
 }
 
 func (p *OIDCProvider) GetName() string {
@@ -149,12 +159,18 @@ func (p *OIDCProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*OAu
 		return nil, NewOAuthError(i18n.MsgOAuthUserInfoEmpty, map[string]any{"Provider": "OIDC"})
 	}
 
-	logger.LogDebug(ctx, "[OAuth-OIDC] GetUserInfo success: sub=%s, username=%s, name=%s, email=%s", oidcUser.OpenID, oidcUser.PreferredUsername, oidcUser.Name, oidcUser.Email)
+	username := oidcUser.resolvedUsername()
+	displayName := strings.TrimSpace(oidcUser.Name)
+	if displayName == "" {
+		displayName = username
+	}
+
+	logger.LogDebug(ctx, "[OAuth-OIDC] GetUserInfo success: sub=%s, username=%s, preferred_username=%s, name=%s, email=%s", oidcUser.OpenID, username, oidcUser.PreferredUsername, oidcUser.Name, oidcUser.Email)
 
 	return &OAuthUser{
 		ProviderUserID: oidcUser.OpenID,
-		Username:       oidcUser.PreferredUsername,
-		DisplayName:    oidcUser.Name,
+		Username:       username,
+		DisplayName:    displayName,
 		Email:          oidcUser.Email,
 	}, nil
 }
