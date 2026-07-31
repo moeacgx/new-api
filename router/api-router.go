@@ -76,6 +76,14 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
+		ecosystemRoute := apiRouter.Group("/ecosystem")
+		{
+			ecosystemRoute.GET("/me", middleware.LogtoAuth("ecosystem:me"), controller.EcosystemMe)
+			ecosystemRoute.GET("/groups", middleware.LogtoAuth("ecosystem:groups:read"), controller.EcosystemGroups)
+			ecosystemRoute.GET("/models", middleware.LogtoAuth("ecosystem:models:read"), controller.EcosystemModels)
+			ecosystemRoute.GET("/tokens", middleware.LogtoAuth("ecosystem:tokens:read"), controller.EcosystemTokens)
+		}
+
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", controller.WaffoWebhook)
