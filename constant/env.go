@@ -26,3 +26,7 @@ var TaskPricePatches []string
 // TrustedRedirectDomains is a list of trusted domains for redirect URL validation.
 // Domains support subdomain matching (e.g., "example.com" matches "sub.example.com").
 var TrustedRedirectDomains []string
+
+// CORSAllowedOrigins is a list of allowed credentialed CORS domains/origins.
+// Domain entries support subdomain matching (e.g., "example.com" matches "sub.example.com").
+var CORSAllowedOrigins []string
